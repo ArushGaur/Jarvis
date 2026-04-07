@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════
-   J.A.R.V.I.S — MINIMAL BLACK SPHERE UI
+   V.I.V.E.K — MINIMAL BLACK SPHERE UI
    style.css
 ═══════════════════════════════════════════════ */
 
@@ -76,156 +76,75 @@ html, body {
   cursor:none;
 }
 
-/* ── HUD ELEMENTS ─────────────────────────────── */
-
-/* JARVIS big title — above sphere center */
+/* ── VIVEK big title — above sphere center */
 #jarvis-label {
   position:fixed;
   top:36px; left:50%;
   transform:translateX(-50%);
   font-family: var(--font-hud);
-  font-size: clamp(.9rem, 2.2vw, 1.5rem);
+  font-size: clamp(1.1rem, 2.8vw, 2rem);
   font-weight:900; letter-spacing:.55em;
-  color:rgba(0,212,255,.18);
+  color:rgba(0,212,255,.35);
   pointer-events:none;
   text-transform:uppercase;
   white-space:nowrap;
   transition: color .6s;
+  text-shadow: 0 0 20px rgba(0,212,255,.3);
 }
 
-/* STATE LABEL — just below the JARVIS title */
+/* STATE LABEL — just below the VIVEK title */
 #state-label {
   position:fixed;
-  top:70px; left:50%;
+  top:82px; left:50%;
   transform:translateX(-50%);
   font-family: var(--font-hud);
-  font-size: clamp(.45rem, 1.1vw, .7rem);
+  font-size: clamp(.5rem, 1.2vw, .8rem);
   letter-spacing:.45em;
-  color:rgba(0,212,255,.3);
+  color:rgba(0,212,255,.4);
   pointer-events:none;
   transition: color .4s, letter-spacing .4s;
 }
 
-body.orb-listening #state-label { color:rgba(255,107,53,.8); letter-spacing:.55em; }
-body.orb-speaking  #state-label { color:rgba(0,255,136,.8); }
-body.orb-thinking  #state-label { color:rgba(255,193,7,.8); }
-
-/* TOP LEFT — personality + color name */
-#top-left-hud {
-  position:fixed; top:32px; left:36px;
-  display:flex; flex-direction:column; gap:4px;
-  pointer-events:none;
-}
-
-#personality-name {
-  font-family: var(--font-hud);
-  font-size: clamp(.55rem, 1.2vw, .8rem);
-  letter-spacing:.3em;
-  color:rgba(0,212,255,.5);
-  transition: color .5s;
-}
-
-#color-name {
-  font-size:.55rem; letter-spacing:.2em;
-  color:rgba(0,212,255,.25);
-  transition: color .5s;
-}
-
-/* TOP RIGHT — time + status */
-#top-right-hud {
-  position:fixed; top:32px; right:36px;
-  display:flex; flex-direction:column; gap:4px;
-  align-items:flex-end;
-  pointer-events:none;
-}
-
-#time-display {
-  font-family: var(--font-hud);
-  font-size: clamp(.55rem, 1.2vw, .8rem);
-  letter-spacing:.18em;
-  color:rgba(0,212,255,.4);
-}
-
-#conn-status {
-  font-size:.55rem; letter-spacing:.22em;
-  color:rgba(0,212,255,.22);
-  transition: color .5s;
-}
-#conn-status.online { color:rgba(0,255,136,.7); }
+body.orb-listening #state-label { color:rgba(255,107,53,.9); letter-spacing:.55em; }
+body.orb-speaking  #state-label { color:rgba(0,255,136,.9); }
+body.orb-thinking  #state-label { color:rgba(255,193,7,.9); }
 
 /* ── TRANSCRIPT ───────────────────────────────── */
 #transcript-box {
   position:fixed;
-  bottom:140px; left:50%;
+  bottom:60px; left:50%;
   transform:translateX(-50%);
-  width: min(600px, 88vw);
+  width: min(700px, 88vw);
   text-align:center;
   min-height:28px;
   pointer-events:none;
 }
 
 #transcript-text {
-  font-size: clamp(.7rem, 1.5vw, .95rem);
+  font-size: clamp(.75rem, 1.6vw, 1rem);
   letter-spacing:.06em;
-  color:rgba(0,212,255,.2);
+  color:rgba(0,212,255,.3);
   line-height:1.6;
   transition: color .3s;
 }
 
 #transcript-text.active {
-  color:rgba(0,212,255,.75);
-}
-
-/* ── MIC BUTTON ───────────────────────────────── */
-#mic-btn {
-  position:fixed;
-  bottom:52px; left:50%;
-  transform:translateX(-50%);
-  width:68px; height:68px;
-  border-radius:50%;
-  border: 1.5px solid rgba(0,212,255,.35);
-  background:rgba(0,212,255,.05);
-  color:rgba(0,212,255,.6);
-  cursor:pointer;
-  display:flex; align-items:center; justify-content:center;
-  transition: all .3s;
-  backdrop-filter: blur(4px);
-}
-
-#mic-btn svg { width:26px; height:26px; }
-
-#mic-btn:hover {
-  border-color:rgba(0,212,255,.8);
-  background:rgba(0,212,255,.1);
-  color:#00d4ff;
-  box-shadow: 0 0 24px rgba(0,212,255,.35);
-}
-
-#mic-btn.listening {
-  border-color:rgba(255,107,53,.9);
-  background:rgba(255,107,53,.08);
-  color:#ff6b35;
-  box-shadow: 0 0 32px rgba(255,107,53,.5), 0 0 60px rgba(255,107,53,.15);
-  animation: mic-pulse 1s ease-in-out infinite;
-}
-
-@keyframes mic-pulse {
-  0%,100% { box-shadow: 0 0 28px rgba(255,107,53,.5), 0 0 55px rgba(255,107,53,.12); }
-  50%      { box-shadow: 0 0 44px rgba(255,107,53,.8), 0 0 90px rgba(255,107,53,.2); }
+  color:rgba(0,212,255,.85);
+  text-shadow: 0 0 12px rgba(0,212,255,.3);
 }
 
 /* ── STOP BUTTON ──────────────────────────────── */
 #stop-btn {
   position:fixed;
-  bottom:52px; left:calc(50% + 84px);
-  transform:translateY(18px);
+  bottom:24px; left:50%;
+  transform:translateX(-50%);
   display:none;
   background:transparent;
   border:1px solid rgba(255,51,51,.45);
   color:rgba(255,51,51,.7);
   font-family: var(--font-hud);
   font-size:.48rem; letter-spacing:.18em;
-  padding:6px 12px; cursor:pointer;
+  padding:6px 16px; cursor:pointer;
   border-radius:2px;
   transition: all .2s;
 }
@@ -295,21 +214,6 @@ body.orb-thinking  #state-label { color:rgba(255,193,7,.8); }
 #api-status {
   font-size:.55rem; text-align:center; letter-spacing:.1em;
   min-height:14px;
-}
-
-/* ── HINT BOX ─────────────────────────────────── */
-#hint-box {
-  position:fixed;
-  bottom:36px; right:36px;
-  display:flex; flex-direction:column; gap:5px;
-  text-align:right;
-  pointer-events:none;
-}
-
-.hint {
-  font-size:.52rem; letter-spacing:.05em;
-  color:rgba(0,212,255,.18);
-  line-height:1.5;
 }
 
 /* ── TOAST ────────────────────────────────────── */
