@@ -7,7 +7,7 @@
 // ─────────────────────────────────────────────────────
 //  GLOBAL STATE
 // ─────────────────────────────────────────────────────
-let apiKey       = '';
+let apiKey       = 'AIzaSyAjEh08p5Qo5kOJgGXjZndhpmHp_gyV1k8';
 let messages     = [];
 let isThinking   = false;
 let isListening  = false;
