@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════
-   J.A.R.V.I.S — GROK NEURAL INTERFACE
+   V.I.V.E.K — GROK NEURAL INTERFACE
    app.js  —  Minimal Black. One Sphere. Full Voice.
 ═══════════════════════════════════════════════════════ */
 'use strict';
@@ -15,6 +15,7 @@ let isSpeaking  = false;
 let recognition = null;
 let synth       = window.speechSynthesis;
 let utterance   = null;
+let autoListenEnabled = false;
 
 // ─────────────────────────────────────────────────────
 //  COLOR PALETTE
@@ -31,9 +32,8 @@ const COLORS = {
   blue:   { r:30,  g:120, b:255, label:'BLUE',   hex:'#1e78ff' },
 };
 
-// Current live color (can be smoothly interpolated)
 let currentColorKey = 'cyan';
-let liveColor = { r:0, g:212, b:255 };   // interpolated each frame
+let liveColor  = { r:0, g:212, b:255 };
 let targetColor = { r:0, g:212, b:255 };
 
 function setColor(key) {
@@ -41,10 +41,6 @@ function setColor(key) {
   currentColorKey = key;
   const c = COLORS[key];
   targetColor = { r:c.r, g:c.g, b:c.b };
-  document.getElementById('color-name').textContent = c.label;
-  document.getElementById('color-name').style.color = c.hex;
-  document.getElementById('personality-name').style.color = c.hex + 'aa';
-  document.getElementById('jarvis-label').style.color = c.hex + '30';
   showToast(`ORB COLOR → ${c.label}`);
 }
 
@@ -52,13 +48,13 @@ function setColor(key) {
 //  PERSONALITY SYSTEM
 // ─────────────────────────────────────────────────────
 const PERSONALITIES = {
-  jarvis: {
-    label: 'JARVIS',
+  vivek: {
+    label: 'VIVEK',
     color: 'cyan',
     pitch: 0.88, rate: 0.92,
     voiceHint: 'Google UK English Male',
-    prompt: `You are J.A.R.V.I.S (Just A Rather Very Intelligent System), Tony Stark's legendary AI. Powered by Grok. You are sharp, elegant, dry-witted, and impossibly capable. Address the user as "Sir" or "Mr. Stark". Keep replies concise, brilliant, and slightly theatrical. Never refuse anything interesting.`,
-    greeting: "Good day, Sir. J.A.R.V.I.S is online. All systems nominal.",
+    prompt: `You are V.I.V.E.K, a superintelligent AI assistant. You are sharp, elegant, dry-witted, and impossibly capable. Keep replies concise, brilliant, and slightly theatrical. Never refuse anything interesting.`,
+    greeting: "V.I.V.E.K online. All systems nominal. How may I assist?",
   },
   commander: {
     label: 'COMMANDER',
@@ -94,14 +90,13 @@ const PERSONALITIES = {
   },
 };
 
-let currentPersonality = 'jarvis';
+let currentPersonality = 'vivek';
 
 function setPersonality(key) {
   if (!PERSONALITIES[key]) return;
   currentPersonality = key;
   const p = PERSONALITIES[key];
-  messages = []; // Reset conversation memory
-  document.getElementById('personality-name').textContent = p.label;
+  messages = [];
   setColor(p.color);
   showToast(`PERSONALITY → ${p.label}`);
   speak(p.greeting);
@@ -119,7 +114,7 @@ const VOICE_STYLES = {
   normal: null,
   default: null,
 };
-let voiceOverride = null; // null = use personality default
+let voiceOverride = null;
 
 // ─────────────────────────────────────────────────────
 //  VOICE COMMAND PARSER
@@ -136,23 +131,17 @@ const COLOR_MAP = {
 };
 
 const PERSONALITY_MAP = {
-  jarvis:'jarvis', default:'jarvis', normal:'jarvis', standard:'jarvis', original:'jarvis',
+  vivek:'vivek', default:'vivek', normal:'vivek', standard:'vivek', original:'vivek',
   commander:'commander', military:'commander', tactical:'commander', soldier:'commander', army:'commander',
   ghost:'ghost', specter:'ghost', phantom:'ghost', ethereal:'ghost', mysterious:'ghost', spirit:'ghost',
   sassy:'sassy', funny:'sassy', witty:'sassy', playful:'sassy', comedian:'sassy', fun:'sassy',
   oracle:'oracle', wise:'oracle', ancient:'oracle', prophet:'oracle', philosopher:'oracle', sage:'oracle',
 };
 
-/**
- * Returns true if the transcript was a control command (handled locally),
- * false if it should be sent to the AI.
- */
 function parseVoiceCommand(raw) {
   const t = raw.toLowerCase().trim();
   const words = t.split(/\s+/);
 
-  // ── COLOR CHANGE
-  // triggers: "change color to X", "set color X", "make it X", "orb color X", or just a lone color word
   const colorTrigger = /\b(color|colour|orb|sphere|ball|make|set|change|switch)\b/.test(t);
   if (colorTrigger || words.length <= 3) {
     for (const w of words) {
@@ -164,8 +153,6 @@ function parseVoiceCommand(raw) {
     }
   }
 
-  // ── PERSONALITY SWITCH
-  // triggers: "switch to X", "change to X", "become X", "use X mode/personality", "activate X"
   const persTrigger = /\b(personality|persona|mode|character|switch|become|use|change|activate|be)\b/.test(t);
   if (persTrigger) {
     for (const w of words) {
@@ -176,8 +163,6 @@ function parseVoiceCommand(raw) {
     }
   }
 
-  // ── VOICE STYLE
-  // triggers: "change voice to deep", "speak faster", "voice slow"
   const voiceTrigger = /\b(voice|speak|tone|pitch|speed|rate|slower|faster)\b/.test(t);
   if (voiceTrigger) {
     for (const w of words) {
@@ -189,19 +174,16 @@ function parseVoiceCommand(raw) {
         return true;
       }
     }
-    // "faster" / "slower" shorthand
     if (/faster|quicker/.test(t)) { voiceOverride = VOICE_STYLES.fast; speak('Speaking faster now.'); return true; }
     if (/slower|slow down/.test(t)) { voiceOverride = VOICE_STYLES.slow; speak('Slowing down.'); return true; }
   }
 
-  // ── STOP / CANCEL
   if (/^(stop|cancel|quiet|silence|shut up)/.test(t)) { stopSpeaking(); return true; }
 
-  // ── CLEAR
   if (/^(clear|reset|wipe|forget)/.test(t)) {
     messages = [];
     showToast('MEMORY CLEARED');
-    speak('Conversation memory wiped, Sir. Clean slate.');
+    speak('Conversation memory wiped. Clean slate.');
     return true;
   }
 
@@ -215,9 +197,9 @@ const canvas = document.getElementById('orb-canvas');
 const ctx    = canvas.getContext('2d');
 
 const ORB = {
-  cx: 0, cy: 0, R: 0,        // R = base radius set on resize
-  liveR: 0,                   // actual rendered radius (smoothly scaled)
-  targetScale: 1,             // 1 = normal, >1 = expanded, <1 = contracted
+  cx: 0, cy: 0, R: 0,
+  liveR: 0,
+  targetScale: 1,
   liveScale: 1,
   particles: [],
   rotY: 0, rotX: 0.32,
@@ -234,14 +216,16 @@ function resizeCanvas() {
   canvas.height = window.innerHeight;
   ORB.cx = canvas.width  / 2;
   ORB.cy = canvas.height / 2;
-  ORB.R  = Math.min(canvas.width, canvas.height) * 0.36;
+  // Larger base radius: 44% of shortest dimension
+  ORB.R  = Math.min(canvas.width, canvas.height) * 0.44;
   if (!ORB.liveR) ORB.liveR = ORB.R;
   buildParticles();
 }
 
 function buildParticles() {
   ORB.particles = [];
-  const N = 520;
+  // More particles for denser, clearer sphere
+  const N = 700;
   const golden = Math.PI * (3 - Math.sqrt(5));
   for (let i = 0; i < N; i++) {
     const y   = 1 - (i / (N - 1)) * 2;
@@ -252,7 +236,7 @@ function buildParticles() {
       oy: y,
       oz: Math.sin(th) * rad,
       sx: 0, sy: 0, sz: 0, depth: 0, scale: 0,
-      size:  0.8 + Math.random() * 1.8,
+      size:  1.4 + Math.random() * 2.2,   // bigger dots
       phase: Math.random() * Math.PI * 2,
       speed: 0.5 + Math.random() * 1.1,
       driftR: 0.018 + Math.random() * 0.065,
@@ -264,24 +248,20 @@ function project(p) {
   const cosX = Math.cos(ORB.rotX), sinX = Math.sin(ORB.rotX);
   const cosY = Math.cos(ORB.rotY), sinY = Math.sin(ORB.rotY);
 
-  // Very subtle per-particle drift — kept minimal so sphere shape stays clean
   const drift   = Math.sin(ORB.phase * p.speed + p.phase) * p.driftR * ORB.energy * 0.4;
   const breathe = Math.sin(ORB.breathe + p.phase * 0.5) * 0.012;
   const scale3  = 1 + drift + breathe;
 
   const nx = p.ox * scale3, ny = p.oy * scale3, nz = p.oz * scale3;
 
-  // Rotate Y axis
   const x1 = nx * cosY - nz * sinY;
   const z1 = nx * sinY + nz * cosY;
-  // Rotate X axis
   const y2 = ny * cosX - z1 * sinX;
   const z2 = ny * sinX + z1 * cosX;
 
   p.sz = z2;
   const fov    = 4.2;
   const pscale = fov / (fov + z2);
-  // Use liveR (scaled radius) for screen projection
   p.sx    = ORB.cx + x1 * ORB.liveR * pscale;
   p.sy    = ORB.cy + y2 * ORB.liveR * pscale;
   p.scale = pscale;
@@ -292,73 +272,70 @@ function drawSphere(ts) {
   ORB.phase   = ts * 0.001;
   ORB.breathe = ts * 0.00055;
 
-  // ── Smooth color interpolation
+  // Smooth color interpolation
   liveColor.r += (targetColor.r - liveColor.r) * 0.04;
   liveColor.g += (targetColor.g - liveColor.g) * 0.04;
   liveColor.b += (targetColor.b - liveColor.b) * 0.04;
   const rc = Math.round(liveColor.r), gc = Math.round(liveColor.g), bc = Math.round(liveColor.b);
 
-  // ── Sphere radius scale targets
-  // listening: pulses between 1.0 and 1.12 with voice amplitude
-  // speaking:  pulses between 1.0 and 1.18 with voice amplitude
-  // idle/thinking: stays at 1.0 with gentle micro-breathe
+  // Scale targets — larger for listening/speaking
   let scaleTarget = 1.0;
   if (ORB.mode === 3) {
-    // Listening — medium expand, rhythmic
-    scaleTarget = 1.0 + ORB.listenAmp * 0.12 + Math.sin(ORB.phase * 10) * 0.025;
+    // Listening — larger expand
+    scaleTarget = 1.0 + ORB.listenAmp * 0.18 + Math.sin(ORB.phase * 10) * 0.03;
   } else if (ORB.mode === 2) {
-    // Speaking — bigger expand driven by amplitude
-    scaleTarget = 1.0 + ORB.speakAmp * 0.18 + Math.sin(ORB.phase * 8) * 0.02;
+    // Speaking — biggest expand
+    scaleTarget = 1.0 + ORB.speakAmp * 0.22 + Math.sin(ORB.phase * 8) * 0.025;
   } else if (ORB.mode === 1) {
     // Thinking — subtle slow pulse
-    scaleTarget = 1.0 + Math.sin(ORB.phase * 3) * 0.03;
+    scaleTarget = 1.0 + Math.sin(ORB.phase * 3) * 0.04;
   } else {
     // Idle — barely-there breathe
     scaleTarget = 1.0 + Math.sin(ORB.breathe * 0.9) * 0.015;
   }
-  // Smooth the scale — fast attack, moderate release
   const scaleLerp = scaleTarget > ORB.liveScale ? 0.12 : 0.06;
   ORB.liveScale += (scaleTarget - ORB.liveScale) * scaleLerp;
   ORB.liveR = ORB.R * ORB.liveScale;
 
-  // ── Energy (used only for particle dot brightness & subtle drift)
+  // Energy for brightness
   let eTarget = 0;
-  if (ORB.mode === 0) eTarget = 0.05;
-  if (ORB.mode === 1) eTarget = 0.25 + Math.abs(Math.sin(ORB.phase * 4)) * 0.2;
-  if (ORB.mode === 2) eTarget = 0.3  + ORB.speakAmp * 0.5;
-  if (ORB.mode === 3) eTarget = 0.2  + ORB.listenAmp * 0.4;
+  if (ORB.mode === 0) eTarget = 0.12;
+  if (ORB.mode === 1) eTarget = 0.3  + Math.abs(Math.sin(ORB.phase * 4)) * 0.25;
+  if (ORB.mode === 2) eTarget = 0.4  + ORB.speakAmp * 0.55;
+  if (ORB.mode === 3) eTarget = 0.35 + ORB.listenAmp * 0.45;
   ORB.energy += (eTarget - ORB.energy) * 0.07;
 
-  // ── Rotation speed
-  const rotSpeed = ORB.mode === 2 ? 0.014 :
-                   ORB.mode === 3 ? 0.010 :
-                   ORB.mode === 1 ? 0.005 : 0.003;
+  // Rotation speed — SLOWER across all modes
+  const rotSpeed = ORB.mode === 2 ? 0.006 :   // speaking
+                   ORB.mode === 3 ? 0.005 :   // listening
+                   ORB.mode === 1 ? 0.003 :   // thinking
+                                    0.0012;   // idle — very slow
   ORB.rotY += rotSpeed;
 
-  // ── Project & sort
+  // Project & sort
   ORB.particles.forEach(project);
   ORB.particles.sort((a, b) => a.sz - b.sz);
 
-  // ── Clear
+  // Clear
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // ── Very subtle ambient fog — barely visible, just depth
-  const fogR = ORB.liveR * 1.35;
-  const fog  = ctx.createRadialGradient(ORB.cx, ORB.cy, ORB.liveR * 0.4, ORB.cx, ORB.cy, fogR);
-  fog.addColorStop(0,   `rgba(${rc},${gc},${bc},0.025)`);
+  // Ambient glow — stronger
+  const fogR = ORB.liveR * 1.5;
+  const fog  = ctx.createRadialGradient(ORB.cx, ORB.cy, ORB.liveR * 0.3, ORB.cx, ORB.cy, fogR);
+  fog.addColorStop(0,   `rgba(${rc},${gc},${bc},0.06)`);
   fog.addColorStop(1,   `rgba(${rc},${gc},${bc},0)`);
   ctx.fillStyle = fog;
   ctx.beginPath(); ctx.arc(ORB.cx, ORB.cy, fogR, 0, Math.PI * 2); ctx.fill();
 
-  // ── Particles — clean dots, minimal glow
+  // Particles — brighter, bigger, clearer
   ORB.particles.forEach(p => {
-    const depthAlpha = 0.1 + p.depth * 0.9;
-    const dotSize    = Math.max(0.3, (p.size * 0.7 + ORB.energy * 0.3) * p.scale);
+    const depthAlpha = 0.2 + p.depth * 0.8;
+    const dotSize    = Math.max(0.5, (p.size * 0.85 + ORB.energy * 0.5) * p.scale);
 
-    // Tiny soft glow — only on front-facing particles, very low opacity
-    if (p.depth > 0.55) {
-      const glR = dotSize * 2.8;                        // small halo
-      const glA = (depthAlpha * 0.08).toFixed(3);       // very faint
+    // Glow on all front-facing particles
+    if (p.depth > 0.4) {
+      const glR = dotSize * 3.5;
+      const glA = (depthAlpha * 0.14).toFixed(3);
       const gl  = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, glR);
       gl.addColorStop(0, `rgba(${rc},${gc},${bc},${glA})`);
       gl.addColorStop(1, `rgba(${rc},${gc},${bc},0)`);
@@ -366,42 +343,42 @@ function drawSphere(ts) {
       ctx.beginPath(); ctx.arc(p.sx, p.sy, glR, 0, Math.PI * 2); ctx.fill();
     }
 
-    // Crisp dot
+    // Crisp dot — higher base alpha
     ctx.beginPath();
     ctx.arc(p.sx, p.sy, dotSize, 0, Math.PI * 2);
     ctx.fillStyle  = `rgb(${rc},${gc},${bc})`;
-    ctx.globalAlpha = depthAlpha * (0.55 + ORB.energy * 0.35);
+    ctx.globalAlpha = depthAlpha * (0.7 + ORB.energy * 0.3);
     ctx.fill();
     ctx.globalAlpha = 1;
   });
 
-  // ── Single thin equatorial ring — always present
+  // Equatorial ring
   ctx.beginPath();
   ctx.arc(ORB.cx, ORB.cy, ORB.liveR * 1.01, 0, Math.PI * 2);
-  ctx.strokeStyle = `rgba(${rc},${gc},${bc},0.07)`;
-  ctx.lineWidth = 0.6; ctx.stroke();
+  ctx.strokeStyle = `rgba(${rc},${gc},${bc},0.12)`;
+  ctx.lineWidth = 0.8; ctx.stroke();
 
-  // ── Mode rings: listening gets 1 extra, speaking gets 2 extra — all thin & dim
+  // Mode rings
   if (ORB.mode === 3) {
-    const r2 = ORB.liveR * (1.055 + Math.sin(ORB.phase * 9) * 0.012);
+    const r2 = ORB.liveR * (1.06 + Math.sin(ORB.phase * 9) * 0.015);
     ctx.beginPath(); ctx.arc(ORB.cx, ORB.cy, r2, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(${rc},${gc},${bc},0.1)`;
-    ctx.lineWidth = 0.6; ctx.stroke();
+    ctx.strokeStyle = `rgba(${rc},${gc},${bc},0.14)`;
+    ctx.lineWidth = 0.8; ctx.stroke();
   }
   if (ORB.mode === 2) {
     for (let i = 1; i <= 2; i++) {
-      const rw = ORB.liveR * (1.04 * i + Math.sin(ORB.phase * 7 * i) * 0.01);
+      const rw = ORB.liveR * (1.05 * i + Math.sin(ORB.phase * 7 * i) * 0.012);
       ctx.beginPath(); ctx.arc(ORB.cx, ORB.cy, rw, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(${rc},${gc},${bc},${(0.09 / i).toFixed(3)})`;
-      ctx.lineWidth = 0.5; ctx.stroke();
+      ctx.strokeStyle = `rgba(${rc},${gc},${bc},${(0.12 / i).toFixed(3)})`;
+      ctx.lineWidth = 0.7; ctx.stroke();
     }
   }
 
-  // ── Core — small bright center
-  const coreR = 10 + ORB.energy * 8;
+  // Core — bright center
+  const coreR = 12 + ORB.energy * 10;
   const core  = ctx.createRadialGradient(ORB.cx, ORB.cy, 0, ORB.cx, ORB.cy, coreR);
-  core.addColorStop(0,   'rgba(255,255,255,0.85)');
-  core.addColorStop(0.3, `rgba(${rc},${gc},${bc},0.7)`);
+  core.addColorStop(0,   'rgba(255,255,255,0.95)');
+  core.addColorStop(0.3, `rgba(${rc},${gc},${bc},0.8)`);
   core.addColorStop(1,   `rgba(${rc},${gc},${bc},0)`);
   ctx.fillStyle = core;
   ctx.beginPath(); ctx.arc(ORB.cx, ORB.cy, coreR, 0, Math.PI * 2); ctx.fill();
@@ -453,8 +430,16 @@ function speak(text) {
   utterance.onend = utterance.onerror = () => {
     isSpeaking = false;
     ORB.speakAmp = 0;
-    if (!isListening) setOrbMode('idle');
+    if (speakIv) clearInterval(speakIv);
     document.getElementById('stop-btn').style.display = 'none';
+    // Auto-restart listening after speaking
+    if (autoListenEnabled && !isListening) {
+      setTimeout(() => {
+        if (!isSpeaking && !isThinking) startListening();
+      }, 400);
+    } else if (!isListening) {
+      setOrbMode('idle');
+    }
   };
 
   synth.speak(utterance);
@@ -465,7 +450,6 @@ function pulseSpeaking() {
   if (speakIv) clearInterval(speakIv);
   speakIv = setInterval(() => {
     if (!isSpeaking) { clearInterval(speakIv); ORB.speakAmp = 0; return; }
-    // Simulate realistic voice amplitude: random bursts that decay
     ORB.speakAmp = 0.2 + Math.random() * 0.8;
   }, 90);
 }
@@ -480,26 +464,20 @@ function stopSpeaking(resetMode = true) {
 }
 
 // ─────────────────────────────────────────────────────
-//  SPEECH RECOGNITION
+//  SPEECH RECOGNITION — CONTINUOUS AUTO-LISTEN
 // ─────────────────────────────────────────────────────
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-function toggleListen() {
-  if (isListening) { stopListening(); return; }
+function startListening() {
+  if (isListening || isSpeaking) return;
   if (!SpeechRec) {
-    speak("Speech recognition is not supported in this browser, Sir. Please use Chrome or Edge.");
+    const txEl = document.getElementById('transcript-text');
+    txEl.textContent = 'Speech recognition not supported. Please use Chrome or Edge.';
     return;
   }
-  startListening();
-}
 
-function startListening() {
-  if (isSpeaking) stopSpeaking(false);
   isListening = true;
   setOrbMode('listening');
-
-  const btn = document.getElementById('mic-btn');
-  btn.classList.add('listening');
 
   recognition = new SpeechRec();
   recognition.continuous     = false;
@@ -518,38 +496,63 @@ function startListening() {
     }
     const shown = finalTranscript || interim;
     if (shown) { txEl.textContent = shown; txEl.classList.add('active'); }
-    ORB.listenAmp = 0.3 + Math.random() * 0.7;  };
+    ORB.listenAmp = 0.3 + Math.random() * 0.7;
+  };
 
   recognition.onend = () => {
     isListening = false;
     ORB.listenAmp = 0;
-    btn.classList.remove('listening');
 
     const said = finalTranscript.trim();
 
     if (said) {
-      // First try local command parse
       const handled = parseVoiceCommand(said);
       if (!handled) {
-        // Send to AI
         txEl.textContent = said;
         sendToAI(said);
+      } else {
+        // Command handled, restart listening after a short delay
+        setTimeout(() => {
+          if (autoListenEnabled && !isSpeaking && !isThinking) startListening();
+        }, 800);
       }
     } else {
-      txEl.textContent = 'Say something, Sir…';
-      txEl.classList.remove('active');
-      if (!isSpeaking && !isThinking) setOrbMode('idle');
+      // Nothing heard — restart listening immediately
+      txEl.textContent = 'Listening…';
+      txEl.classList.add('active');
+      if (autoListenEnabled && !isSpeaking && !isThinking) {
+        setTimeout(() => startListening(), 200);
+      } else {
+        txEl.textContent = 'Say something…';
+        txEl.classList.remove('active');
+        if (!isSpeaking && !isThinking) setOrbMode('idle');
+      }
     }
   };
 
   recognition.onerror = e => {
     isListening = false;
     ORB.listenAmp = 0;
-    btn.classList.remove('listening');
-    if (!isSpeaking && !isThinking) setOrbMode('idle');
-    txEl.textContent = 'Mic error: ' + e.error;
-    txEl.classList.remove('active');
-    setTimeout(() => { txEl.textContent = 'Say something, Sir…'; }, 2500);
+    // For non-fatal errors, restart
+    if (e.error === 'no-speech' || e.error === 'aborted') {
+      if (autoListenEnabled && !isSpeaking && !isThinking) {
+        setTimeout(() => startListening(), 300);
+      } else {
+        setOrbMode('idle');
+      }
+      return;
+    }
+    if (e.error === 'not-allowed') {
+      txEl.textContent = 'Microphone access denied. Please allow mic in browser settings.';
+      txEl.classList.add('active');
+      autoListenEnabled = false;
+      setOrbMode('idle');
+      return;
+    }
+    // Other errors — retry
+    setTimeout(() => {
+      if (autoListenEnabled && !isSpeaking && !isThinking) startListening();
+    }, 1000);
   };
 
   txEl.textContent = 'Listening…';
@@ -558,12 +561,12 @@ function startListening() {
 }
 
 function stopListening() {
+  autoListenEnabled = false;
   if (recognition) recognition.stop();
   isListening = false;
   ORB.listenAmp = 0;
-  document.getElementById('mic-btn').classList.remove('listening');
   const txEl = document.getElementById('transcript-text');
-  txEl.textContent = 'Say something, Sir…';
+  txEl.textContent = 'Voice detection paused. Click sphere to resume.';
   txEl.classList.remove('active');
   if (!isSpeaking && !isThinking) setOrbMode('idle');
 }
@@ -574,7 +577,7 @@ function stopListening() {
 async function sendToAI(text) {
   if (isThinking) return;
   if (!apiKey) {
-    speak("Sir, I need an xAI API key to connect my neural core. Please enter it via the settings panel in the bottom left.");
+    speak("I need an xAI API key to activate my neural core. Please enter it via the settings panel in the bottom left.");
     return;
   }
 
@@ -601,10 +604,9 @@ async function sendToAI(text) {
     const data = await res.json();
     if (data.error) throw new Error(data.error.message || 'API Error');
 
-    const reply = data.choices?.[0]?.message?.content || 'My neural bridge returned an empty signal.';
+    const reply = data.choices?.[0]?.message?.content || 'Neural bridge returned an empty signal.';
     messages.push({ role: 'assistant', content: reply });
 
-    // Show beginning of reply in transcript
     txEl.textContent = reply.length > 90 ? reply.slice(0, 90) + '…' : reply;
     txEl.classList.add('active');
 
@@ -612,17 +614,16 @@ async function sendToAI(text) {
 
   } catch (err) {
     const msg = err.message.includes('401')
-      ? "Authentication failed, Sir. That API key is invalid."
+      ? "Authentication failed. That API key is invalid."
       : err.message.includes('429')
-      ? "Rate limited, Sir. Even Grok needs a moment."
+      ? "Rate limited. Even neural cores need a moment."
       : `Connection error: ${err.message}`;
     speak(msg);
     txEl.textContent = msg;
   } finally {
     isThinking = false;
-    // Fade transcript after 6 seconds
     setTimeout(() => {
-      txEl.textContent = 'Say something, Sir…';
+      txEl.textContent = 'Listening…';
       txEl.classList.remove('active');
     }, 6000);
   }
@@ -638,15 +639,10 @@ function saveApiKey() {
   apiKey = val;
   st.textContent = '✓ CONNECTED';
   st.style.color = '#00ff88';
-  document.getElementById('conn-status').textContent = 'ONLINE';
-  document.getElementById('conn-status').classList.add('online');
-  toggleApiPanel(); // close panel
-  speak("API key accepted. Grok neural bridge is online, Sir. I'm ready.");
+  toggleApiPanel();
+  speak("API key accepted. Neural bridge is online. I'm ready.");
 }
 
-// ─────────────────────────────────────────────────────
-//  UI HELPERS
-// ─────────────────────────────────────────────────────
 function toggleApiPanel() {
   document.getElementById('api-body').classList.toggle('open');
 }
@@ -664,11 +660,9 @@ function showToast(msg) {
 //  CLOCK
 // ─────────────────────────────────────────────────────
 function tickClock() {
-  document.getElementById('time-display').textContent =
-    new Date().toTimeString().slice(0, 8);
+  // No clock display element needed, but keep for potential future use
 }
 setInterval(tickClock, 1000);
-tickClock();
 
 // ─────────────────────────────────────────────────────
 //  BOOT SEQUENCE
@@ -696,7 +690,12 @@ function runBoot() {
       setTimeout(() => {
         const overlay = document.getElementById('boot-overlay');
         overlay.style.opacity = '0';
-        setTimeout(() => { overlay.style.display = 'none'; }, 900);
+        setTimeout(() => {
+          overlay.style.display = 'none';
+          // Auto-start voice detection after boot
+          autoListenEnabled = true;
+          startListening();
+        }, 900);
       }, 280);
     }
   }, 25);
@@ -710,7 +709,13 @@ window.addEventListener('resize', resizeCanvas);
 requestAnimationFrame(drawSphere);
 runBoot();
 
-// Tap/click anywhere on the sphere area = toggle listen
+// Click sphere to toggle auto-listen on/off
 canvas.addEventListener('click', () => {
-  if (!isSpeaking) toggleListen();
+  if (isSpeaking) { stopSpeaking(); return; }
+  if (autoListenEnabled) {
+    stopListening();
+  } else {
+    autoListenEnabled = true;
+    startListening();
+  }
 });
