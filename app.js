@@ -1332,8 +1332,12 @@ async function startGeminiSession(initialText) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         setup: {
-          model: 'models/gemini-2.0-flash-exp',
-          generationConfig: { responseModalities: ['AUDIO', 'TEXT'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: p.geminiVoice || 'Charon' } } } },
+          model: 'models/gemini-3.1-flash-live-preview',
+          generationConfig: {
+            responseModalities: ['AUDIO'],
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: p.geminiVoice || 'Charon' } } },
+            outputAudioTranscription: {}
+          },
           systemInstruction: { parts: [{ text: p.prompt }] }
         }
       }));
@@ -1357,18 +1361,26 @@ async function startGeminiSession(initialText) {
     }
     if (data.serverContent) {
       const sc = data.serverContent;
+      // Handle audio parts
       if (sc.modelTurn && sc.modelTurn.parts) {
         for (const part of sc.modelTurn.parts) {
           if (part.inlineData && part.inlineData.mimeType && part.inlineData.mimeType.indexOf('audio') !== -1) {
             if (!isSpeaking) { isSpeaking = true; stopMicCapture(); setOrbMode('speaking'); document.getElementById('stop-btn').style.display = 'block'; pulseSpeaking(); }
             playGeminiChunk(part.inlineData.data);
           }
+          // gemini-3.1 native audio: text comes in part.text too (fallback)
           if (part.text) {
             assistantBuffer += part.text;
             txEl.textContent = assistantBuffer.length > 120 ? assistantBuffer.slice(0, 120) + '…' : assistantBuffer;
             txEl.classList.add('active');
           }
         }
+      }
+      // Native audio transcript (gemini-3.1-flash-live-preview sends transcripts here)
+      if (sc.outputAudioTranscription && sc.outputAudioTranscription.text) {
+        assistantBuffer += sc.outputAudioTranscription.text;
+        txEl.textContent = assistantBuffer.length > 120 ? assistantBuffer.slice(0, 120) + '…' : assistantBuffer;
+        txEl.classList.add('active');
       }
       if (sc.turnComplete) {
         if (assistantBuffer) { saveMessage('assistant', assistantBuffer); assistantBuffer = ''; }
