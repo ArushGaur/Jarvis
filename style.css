@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════
-   V.I.V.E.K — HOLOGRAPHIC IRON MAN SPHERE UI
+   V.I.V.E.K — JARVIS HOLOGRAPHIC INTERFACE
    style.css
 ═══════════════════════════════════════════════ */
 
@@ -76,7 +76,7 @@ html, body {
   cursor:crosshair;
 }
 
-/* ── VIVEK big title ─────────────────────────── */
+/* ── VIVEK title ─────────────────────────── */
 #jarvis-label {
   position:fixed;
   top:36px; left:50%;
@@ -90,6 +90,16 @@ html, body {
   white-space:nowrap;
   transition: color .6s;
   text-shadow: 0 0 20px rgba(255,154,0,.3);
+}
+
+/* Decorative line under title */
+#jarvis-label::after {
+  content:'';
+  display:block;
+  width:100%;
+  height:1px;
+  margin-top:6px;
+  background: linear-gradient(90deg, transparent, rgba(255,154,0,.4), transparent);
 }
 
 /* STATE LABEL */
@@ -107,7 +117,25 @@ html, body {
 
 body.orb-listening #state-label { color:rgba(255,220,80,.9); letter-spacing:.55em; }
 body.orb-speaking  #state-label { color:rgba(255,100,30,.9); }
-body.orb-thinking  #state-label { color:rgba(255,60,0,.9); }
+body.orb-thinking  #state-label { color:rgba(255,60,0,.9); animation: pulse-label .6s ease-in-out infinite alternate; }
+
+@keyframes pulse-label { from { opacity:.6; } to { opacity:1; } }
+
+/* HUD border decorations on screen edges */
+body::before, body::after {
+  content:'';
+  position:fixed;
+  pointer-events:none;
+  z-index:500;
+}
+body::before {
+  top:0; left:0; right:0; height:1px;
+  background: linear-gradient(90deg, transparent 5%, rgba(255,154,0,.15) 20%, rgba(255,154,0,.25) 50%, rgba(255,154,0,.15) 80%, transparent 95%);
+}
+body::after {
+  bottom:0; left:0; right:0; height:1px;
+  background: linear-gradient(90deg, transparent 5%, rgba(255,154,0,.15) 20%, rgba(255,154,0,.25) 50%, rgba(255,154,0,.15) 80%, transparent 95%);
+}
 
 /* ── TRANSCRIPT ───────────────────────────────── */
 #transcript-box {
@@ -118,6 +146,15 @@ body.orb-thinking  #state-label { color:rgba(255,60,0,.9); }
   text-align:center;
   min-height:28px;
   pointer-events:none;
+}
+
+#transcript-box::before {
+  content:'';
+  display:block;
+  width:60%;
+  margin:0 auto 8px;
+  height:1px;
+  background: linear-gradient(90deg, transparent, rgba(255,154,0,.2), transparent);
 }
 
 #transcript-text {
