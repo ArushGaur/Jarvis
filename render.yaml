@@ -1,0 +1,24 @@
+# ═══════════════════════════════════════════════════════
+# render.yaml — Render deployment config for V.I.V.E.K backend
+# Push this to your GitHub repo, then connect to Render
+# ═══════════════════════════════════════════════════════
+
+services:
+  - type: web
+    name: vivek-backend
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false          # Set manually in Render dashboard
+      - key: TURSO_DATABASE_URL
+        sync: false          # Set manually in Render dashboard
+      - key: TURSO_AUTH_TOKEN
+        sync: false          # Set manually in Render dashboard
+      - key: FRONTEND_URL
+        sync: false          # Set to your frontend URL
+      - key: NODE_ENV
+        value: production
