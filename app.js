@@ -1308,7 +1308,6 @@ function pulseSpeaking() {
    GEMINI LIVE SESSION
 ───────────────────────────────────────────────────── */
 async function startGeminiSession(initialText) {
-  if (!apiKey) { speakSystem("API key not loaded."); return; }
   if (liveWs && liveWs.readyState === WebSocket.OPEN) liveWs.close();
   stopWakeDetection();
   isDormant = false; sessionReady = false; isListening = true; isThinking = false; isSpeaking = false; nextPlayTime = 0;
