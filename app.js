@@ -4,7 +4,7 @@
 ═══════════════════════════════════════════════════════ */
 'use strict';
 
-const BACKEND_URL = 'https://vivek-qqwu.onrender.com';
+const BACKEND_URL = 'https://vivek-backend.onrender.com';
 
 let apiKey       = '';
 let messages     = [];
@@ -1317,38 +1317,29 @@ async function startGeminiSession(initialText) {
   txEl.textContent = 'Connecting to Gemini Live…'; txEl.classList.add('active');
   setOrbMode('thinking');
   const url = 'wss://vivek-qqwu.onrender.com/gemini-proxy';
-  try { liveWs = new WebSocket(url); } catch(e) {
+  let ws;
+  try { ws = new WebSocket(url); liveWs = ws; } catch(e) {
     txEl.textContent = 'WebSocket failed: ' + e.message;
     closeLiveSession(); scheduleWakeRestart(2000); return;
   }
   const connTimeout = setTimeout(() => {
     if (!sessionReady) { txEl.textContent = 'Connection timed out.'; closeLiveSession(); scheduleWakeRestart(2000); }
-  }, 12000);
- liveWs.onopen = function() {
-    if (liveWs.readyState === WebSocket.OPEN) {
-      liveWs.send(JSON.stringify({
+  }, 15000);
+  ws.onopen = function() {
+    if (liveWs !== ws) { ws.close(); return; }
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
         setup: {
           model: 'models/gemini-2.0-flash-live-001',
           generationConfig: { responseModalities: ['AUDIO', 'TEXT'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: p.geminiVoice || 'Charon' } } } },
           systemInstruction: { parts: [{ text: p.prompt }] }
         }
       }));
-    } else {
-      setTimeout(function() {
-        if (liveWs.readyState === WebSocket.OPEN) {
-          liveWs.send(JSON.stringify({
-            setup: {
-              model: 'models/gemini-2.0-flash-live-001',
-              generationConfig: { responseModalities: ['AUDIO', 'TEXT'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: p.geminiVoice || 'Charon' } } } },
-              systemInstruction: { parts: [{ text: p.prompt }] }
-            }
-          }));
-        }
-      }, 500);
     }
   };
   let assistantBuffer = '';
-  liveWs.onmessage = async (event) => {
+  ws.onmessage = async function(event) {
+    if (liveWs !== ws) return;
     let data;
     try {
       const raw = (event.data instanceof Blob) ? await event.data.text() : event.data;
@@ -1395,13 +1386,13 @@ async function startGeminiSession(initialText) {
       closeLiveSession(); scheduleWakeRestart(2000);
     }
   };
-  liveWs.onerror = function() {
+  ws.onerror = function() {
     clearTimeout(connTimeout);
     document.getElementById('transcript-text').textContent = 'Connection error.';
     document.getElementById('transcript-text').classList.add('active');
     closeLiveSession(); setOrbMode('idle'); scheduleWakeRestart(3000);
   };
-  liveWs.onclose = function() {
+  ws.onclose = function() {
     clearTimeout(connTimeout); sessionReady = false; stopMicCapture();
     if (!isDormant) { isDormant = true; setOrbMode('idle'); scheduleWakeRestart(800); }
   };
