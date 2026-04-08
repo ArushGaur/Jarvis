@@ -269,14 +269,26 @@ const wss = new WebSocketServer({ server: httpServer, path: '/gemini-proxy' });
 
 wss.on('connection', function(clientWs) {
   console.log('[VIVEK] WebSocket client connected');
-  const geminiUrl = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.BidiGenerateContent?key=' + process.env.GEMINI_API_KEY;
-  const geminiWs = new WebSocket(geminiUrl);
+  const geminiUrl = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=' + process.env.GEMINI_API_KEY;
+  const geminiWs = new WebSocket(geminiUrl); // ← this line was missing!
+
+  const messageQueue = [];
+  let geminiReady = false;
+
+  clientWs.on('message', (msg) => {
+    if (geminiReady && geminiWs.readyState === WebSocket.OPEN) {
+      geminiWs.send(msg);
+    } else {
+      messageQueue.push(msg);
+    }
+  });
 
   geminiWs.on('open', () => {
     console.log('[VIVEK] Gemini WebSocket connected');
-    clientWs.on('message', (msg) => {
-      if (geminiWs.readyState === WebSocket.OPEN) geminiWs.send(msg);
-    });
+    geminiReady = true;
+    while (messageQueue.length > 0) {
+      geminiWs.send(messageQueue.shift());
+    }
   });
 
   geminiWs.on('message', (msg) => {
