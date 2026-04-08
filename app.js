@@ -24,6 +24,7 @@ let isSpeaking = false;
 let isDormant = true;
 let currentSessionId = null;
 let apiKey = '';
+let restartAfterCloseText = null;
 
 let liveWs = null;
 let sessionReady = false;
@@ -36,6 +37,7 @@ let micStream = null;
 let scriptProc = null;
 let micSrcNode = null;
 let nativeSR = 48000;
+let activeGeminiSources = new Set();
 
 let wakeRec = null;
 let wakeRunning = false;
@@ -58,7 +60,7 @@ const AGENTS = {
     color: 'orange',
     geminiVoice: 'Puck',
     wakeWord: /\b(vivek|vi vek|viveek|bivek|vibek|vivec|viveck|wivek|vivak|vyvek|veevek)\b/i,
-    greeting: "Vivek online, Sir. How may I assist you today?",
+    greeting: "",
     /* 
       CORE DESIGN: This prompt makes Vivek act as a real agent, not a chatbot.
       He only uses Gemini for research and rephrases everything in his own voice.
@@ -77,7 +79,11 @@ HOW TO RESPOND:
 - If Boss asks for facts, science, news, calculations, definitions, current data → research it internally and deliver the answer in YOUR voice and style. Say things like "Sir, the photoelectric effect works like this..." — never say "According to my search..." or "Gemini says...". You found the information and you are delivering it to Boss.
 - ALWAYS rephrase answers in your own personality. Never give a dry textbook answer. Add a sentence of context, or a slight personal touch.
 
-LANGUAGE: Speak in English primarily. Occasionally you can use simple Hindi phrases like "Ji Sir", "Bilkul Sir", "Haan Boss" naturally — but keep it mostly English.
+LANGUAGE: Speak in natural Hinglish, similar to how an educated Indian professional speaks. Mix Hindi and English fluidly and confidently. Keep the tone crisp and practical.
+Examples:
+- "Sir, bilkul — yeh kaafi important point hai."
+- "Boss, short answer yeh hai..."
+- "Haan Sir, main samjhata hoon step by step."
 
 MEMORY & LEARNING:
 ${instructions.length > 0 ? `Boss has given you these instructions that you must always follow:\n${instructions.map((i, n) => `${n + 1}. ${i}`).join('\n')}` : 'No special instructions yet. Learn from every conversation.'}
@@ -96,7 +102,7 @@ STRICT RULES:
     color: 'pink',
     geminiVoice: 'Aoede',
     wakeWord: /\b(priya|prya|preya|priyaa)\b/i,
-    greeting: "Priya online, Sir. Main yahan hoon — how can I help you?",
+    greeting: "",
     buildPrompt: (instructions) => `You are P.R.I.Y.A — Personal Responsive Intelligent Yielding Assistant. You are the female AI agent of your creator, activated when Boss needs a different perspective or assistance in Hindi and English.
 
 IDENTITY:
@@ -169,7 +175,6 @@ function switchAgent(agentKey) {
   document.getElementById('agent-label').textContent = agent.label;
   document.getElementById('jarvis-label').textContent = agent.label;
   showToast('AGENT SWITCH — ' + agent.label);
-  speakSystem(agent.greeting);
   saveAgentSwitch(agentKey);
 }
 
@@ -979,9 +984,41 @@ function playGeminiChunk(base64) {
   buf.getChannelData(0).set(f32);
   const src = audioCtx.createBufferSource();
   src.buffer = buf; src.connect(audioCtx.destination);
+  activeGeminiSources.add(src);
+  src.onended = () => activeGeminiSources.delete(src);
   const now = audioCtx.currentTime;
   if (nextPlayTime < now + 0.05) nextPlayTime = now + 0.05;
   src.start(nextPlayTime); nextPlayTime += buf.duration;
+}
+
+function stopGeminiPlayback() {
+  if (synth) synth.cancel();
+  isSpeaking = false;
+  ORB.speakAmp = 0;
+  if (speakIv) clearInterval(speakIv);
+  document.getElementById('stop-btn').style.display = 'none';
+  for (const src of activeGeminiSources) {
+    try { src.stop(); } catch(e) {}
+  }
+  activeGeminiSources.clear();
+  if (audioCtx) nextPlayTime = audioCtx.currentTime;
+}
+
+function interruptAndStartNewTurn(userText) {
+  const clean = (userText || '').trim();
+  if (!clean) return;
+  showToast('INTERRUPTED — LISTENING');
+  restartAfterCloseText = clean;
+  stopGeminiPlayback();
+  closeLiveSession();
+  setTimeout(() => {
+    if (restartAfterCloseText) {
+      const nextText = restartAfterCloseText;
+      restartAfterCloseText = null;
+      connectFails = 0;
+      startGeminiSession(nextText);
+    }
+  }, 180);
 }
 
 /* ─────────────────────────────────────────────────────
@@ -1087,7 +1124,8 @@ async function startMicCapture() {
     const txEl = document.getElementById('transcript-text');
     txEl.textContent = err.name === 'NotAllowedError' ? 'Microphone access denied.' : 'Mic error: ' + err.message;
     txEl.classList.add('active');
-    closeLiveSession(); scheduleWakeRestart(2000);
+    closeLiveSession();
+    if (apiKey) setTimeout(() => startGeminiSession(null), 2000);
   }
 }
 
@@ -1103,6 +1141,7 @@ function closeLiveSession() {
   if (liveWs) { try { liveWs.close(); } catch(e) {} liveWs = null; }
   sessionReady = false; isListening = false; isSpeaking = false;
   isThinking = false; isDormant = true;
+  stopGeminiPlayback();
 }
 
 /* ─────────────────────────────────────────────────────
@@ -1178,12 +1217,10 @@ function stopWakeDetection() {
    STOP ALL
 ───────────────────────────────────────────────────── */
 function stopAll() {
-  closeLiveSession(); if (synth) synth.cancel();
-  isSpeaking = false; ORB.speakAmp = 0;
-  if (speakIv) clearInterval(speakIv);
-  document.getElementById('stop-btn').style.display = 'none';
-  if (audioCtx) nextPlayTime = audioCtx.currentTime;
-  setOrbMode('idle'); scheduleWakeRestart(600);
+  stopGeminiPlayback();
+  closeLiveSession();
+  setOrbMode('idle');
+  if (apiKey) setTimeout(() => startGeminiSession(null), 450);
 }
 
 function stopSpeaking() { stopAll(); }
@@ -1203,7 +1240,6 @@ function pulseSpeaking() {
 ───────────────────────────────────────────────────── */
 async function startGeminiSession(initialText) {
   if (liveWs && liveWs.readyState === WebSocket.OPEN) liveWs.close();
-  stopWakeDetection();
   isDormant = false; sessionReady = false; isListening = true;
   isThinking = false; isSpeaking = false; nextPlayTime = 0;
   await createSession();
@@ -1217,11 +1253,17 @@ async function startGeminiSession(initialText) {
   let ws;
   try { ws = new WebSocket('wss://vivek-qqwu.onrender.com/gemini-proxy'); liveWs = ws; } catch(e) {
     txEl.textContent = 'WebSocket failed: ' + e.message;
-    closeLiveSession(); scheduleWakeRestart(2000); return;
+    closeLiveSession();
+    if (apiKey) setTimeout(() => startGeminiSession(null), 2000);
+    return;
   }
 
   const connTimeout = setTimeout(() => {
-    if (!sessionReady) { txEl.textContent = 'Connection timed out.'; closeLiveSession(); scheduleWakeRestart(2000); }
+    if (!sessionReady) {
+      txEl.textContent = 'Connection timed out.';
+      closeLiveSession();
+      if (apiKey) setTimeout(() => startGeminiSession(null), 2000);
+    }
   }, 15000);
 
   ws.onopen = function() {
@@ -1286,6 +1328,11 @@ async function startGeminiSession(initialText) {
         const userSaid = sc.inputAudioTranscription.text;
         const t = userSaid.toLowerCase();
 
+        if (isSpeaking && userSaid.trim().length > 3) {
+          interruptAndStartNewTurn(userSaid);
+          return;
+        }
+
         // Check for agent switch command during active session
         if (/\b(switch to priya|call priya|activate priya|female agent)\b/.test(t)) {
           switchAgent('priya');
@@ -1316,12 +1363,12 @@ async function startGeminiSession(initialText) {
         isThinking = false;
         const remaining = audioCtx ? Math.max(0, nextPlayTime - audioCtx.currentTime) : 0;
         setTimeout(function() {
-          isSpeaking = false; ORB.speakAmp = 0;
-          if (speakIv) clearInterval(speakIv);
-          document.getElementById('stop-btn').style.display = 'none';
-          closeLiveSession();
-          txEl.textContent = `Say "${AGENTS[activeAgent].label}" to activate…`; txEl.classList.remove('active');
-          setOrbMode('idle'); scheduleWakeRestart(500);
+          stopGeminiPlayback();
+          isListening = true;
+          txEl.textContent = 'Listening…';
+          txEl.classList.add('active');
+          setOrbMode('listening');
+          if (!micStream) startMicCapture();
         }, remaining * 1000 + 500);
       }
     }
@@ -1329,7 +1376,8 @@ async function startGeminiSession(initialText) {
     if (data.error) {
       clearTimeout(connTimeout);
       txEl.textContent = data.error.message || 'Neural bridge error.'; txEl.classList.add('active');
-      closeLiveSession(); scheduleWakeRestart(2000);
+      closeLiveSession();
+      if (apiKey) setTimeout(() => startGeminiSession(null), 2000);
     }
   };
 
@@ -1337,12 +1385,14 @@ async function startGeminiSession(initialText) {
     clearTimeout(connTimeout);
     document.getElementById('transcript-text').textContent = 'Connection error.';
     document.getElementById('transcript-text').classList.add('active');
-    closeLiveSession(); setOrbMode('idle'); scheduleWakeRestart(3000);
+    closeLiveSession(); setOrbMode('idle');
+    if (apiKey) setTimeout(() => startGeminiSession(null), 3000);
   };
 
   ws.onclose = function() {
     clearTimeout(connTimeout); sessionReady = false; stopMicCapture();
-    if (!isDormant) {
+    if (restartAfterCloseText) return;
+    if (!isDormant && apiKey) {
       isDormant = true; setOrbMode('idle');
       connectFails++;
       if (connectFails >= MAX_FAILS) {
@@ -1351,7 +1401,7 @@ async function startGeminiSession(initialText) {
         txEl.classList.add('active');
         return;
       }
-      scheduleWakeRestart(800);
+      setTimeout(() => startGeminiSession(null), 800);
     }
   };
 }
@@ -1425,10 +1475,9 @@ function runBoot() {
           const txEl = document.getElementById('transcript-text');
           const loaded = await fetchApiKey();
           if (loaded) {
-            const agent = AGENTS[activeAgent];
-            txEl.textContent = `Say "${agent.label}" to activate…`; txEl.classList.add('active');
-            speakSystem(agent.greeting);
-            setTimeout(startWakeDetection, 1800);
+            txEl.textContent = 'Listening…';
+            txEl.classList.add('active');
+            setTimeout(() => startGeminiSession(null), 900);
           } else {
             txEl.textContent = 'Backend offline. Check BACKEND_URL in app.js.'; txEl.classList.add('active');
           }
