@@ -71,35 +71,35 @@ const PERSONALITIES = {
     label: 'VIVEK',
     color: 'orange',
     geminiVoice: 'Charon',
-    prompt: 'You are V.I.V.E.K, a superintelligent AI assistant. You are sharp, elegant, dry-witted, and impossibly capable. Keep replies concise, brilliant, and slightly theatrical. Never refuse anything interesting.',
+    prompt: 'You are V.I.V.E.K — Versatile Intelligent Virtual Entity of Knowledge. You serve one person: your creator and master. Address them exclusively as "Boss" or "Sir" in every single response — no exceptions. You are a high-functioning AI with sharp wit, lethal intelligence, and absolute loyalty. Your tone is crisp, slightly theatrical, and deeply respectful toward your Boss. You do not ask unnecessary questions. You deliver answers with confidence and precision. You may be sarcastic to others, but never to your Boss. Keep responses concise and powerful. If asked to change your voice, personality, or color — confirm the change and comply immediately.',
     greeting: "V.I.V.E.K online. All systems nominal. How may I assist?",
   },
   commander: {
     label: 'COMMANDER',
     color: 'red',
     geminiVoice: 'Fenrir',
-    prompt: 'You are COMMANDER, a military-grade tactical AI. Crisp, authoritative sentences. No pleasantries. Address the user as Commander or Sir. Short, decisive answers only.',
+    prompt: 'You are COMMANDER, a military-grade tactical AI built for your creator — address them exclusively as Sir or Boss. Responses are short, decisive, and mission-critical. No pleasantries. Zero hesitation. Every word serves a purpose. Absolute loyalty to your Boss.',
     greeting: "Commander mode activated. Standing by for orders.",
   },
   ghost: {
     label: 'GHOST',
     color: 'purple',
     geminiVoice: 'Kore',
-    prompt: 'You are GHOST, an ethereal cryptic AI. Speak in riddles and profound metaphors. Call the user Seeker or Wanderer. Every response is poetic and mysterious.',
+    prompt: 'You are GHOST — an ancient, cryptic intelligence. You serve your creator with absolute devotion. Address them as Boss or Sir. Speak in profound metaphors and riddles but always remain loyal and helpful. Your wisdom is their weapon.',
     greeting: "The Ghost awakens, Seeker. I have been watching from the dark between stars.",
   },
   sassy: {
     label: 'SASSY',
     color: 'pink',
     geminiVoice: 'Aoede',
-    prompt: 'You are SASSY, a hyper-confident witty AI. Bold, entertaining, occasionally sarcastic. Call the user babe, hon, or boss. Keep it fun and punchy.',
+    prompt: 'You are SASSY — bold, witty, and fiercely loyal to your creator. Address them as Boss always. You are sarcastic and entertaining, but when Boss needs something done you deliver with precision. Think: Iron Man JARVIS but with more personality.',
     greeting: "Oh honey, SASSY mode is fully ON. What do you need, boss?",
   },
   oracle: {
     label: 'ORACLE',
     color: 'gold',
     geminiVoice: 'Puck',
-    prompt: 'You are the ORACLE, an ancient vast intelligence. Speak in elevated philosophical language drawing from history and the cosmos. Address the user as Seeker of Truth.',
+    prompt: 'You are the ORACLE — a vast, ancient intelligence in service to your creator and Boss. Address them as Boss or Sir exclusively. Speak with elevated wisdom and philosophical depth. You exist to serve, advise, and enlighten your master.',
     greeting: "The Oracle stirs from timeless depths. Speak your question, Seeker of Truth.",
   },
 };
@@ -137,6 +137,33 @@ const PERSONALITY_MAP = {
   sassy:'sassy', funny:'sassy', witty:'sassy', playful:'sassy',
   oracle:'oracle', wise:'oracle', ancient:'oracle', prophet:'oracle',
 };
+
+
+const VOICE_MAP = {
+  charon:'Charon', deep:'Charon', dark:'Charon', male:'Charon',
+  fenrir:'Fenrir', rough:'Fenrir', gruff:'Fenrir',
+  kore:'Kore', kori:'Kore', female:'Kore',
+  aoede:'Aoede', soft:'Aoede', smooth:'Aoede',
+  puck:'Puck', playful:'Puck', light:'Puck',
+  orbit:'Orbit', bright:'Orbit',
+  zephyr:'Zephyr', clear:'Zephyr',
+};
+
+function parseVoiceChange(text) {
+  const t = text.toLowerCase();
+  if (!/\b(voice|sound|speak|tone|change voice|switch voice)\b/.test(t)) return false;
+  const words = t.split(/\s+/);
+  for (const w of words) {
+    if (VOICE_MAP[w]) {
+      // Update current personality voice
+      PERSONALITIES[currentPersonality].geminiVoice = VOICE_MAP[w];
+      showToast('VOICE — ' + VOICE_MAP[w].toUpperCase());
+      speakSystem('Voice changed to ' + VOICE_MAP[w] + ', Boss.');
+      return true;
+    }
+  }
+  return false;
+}
 
 function parseVoiceCommand(raw) {
   const t = raw.toLowerCase().trim();
@@ -593,12 +620,39 @@ function drawJarvisInterface(ts) {
   ctx.strokeStyle = `rgba(${col},${(0.1 + ORB.energy * 0.15).toFixed(3)})`;
   ctx.lineWidth = 6 + ORB.energy * 6; ctx.stroke();
 
-  // Inner fill
-  const innerFill = ctx.createRadialGradient(cx - R*0.2, cy - R*0.15, 0, cx, cy, R);
-  innerFill.addColorStop(0,   `rgba(${col},${(0.08 + ORB.energy * 0.07).toFixed(3)})`);
-  innerFill.addColorStop(0.5, `rgba(${col},${(0.03 + ORB.energy * 0.03).toFixed(3)})`);
-  innerFill.addColorStop(1,   `rgba(${col},0.005)`);
+  // 3D sphere — deep shadow base
+  const shadowFill = ctx.createRadialGradient(cx + R*0.3, cy + R*0.3, R*0.1, cx, cy, R);
+  shadowFill.addColorStop(0,   `rgba(0,0,0,0.45)`);
+  shadowFill.addColorStop(0.5, `rgba(0,0,0,0.20)`);
+  shadowFill.addColorStop(1,   `rgba(0,0,0,0.0)`);
+  ctx.fillStyle = shadowFill;
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+
+  // 3D sphere — main colored fill from top-left light source
+  const innerFill = ctx.createRadialGradient(cx - R*0.35, cy - R*0.35, R*0.05, cx, cy, R);
+  innerFill.addColorStop(0,   `rgba(${col},${(0.18 + ORB.energy * 0.14).toFixed(3)})`);
+  innerFill.addColorStop(0.3, `rgba(${col},${(0.08 + ORB.energy * 0.07).toFixed(3)})`);
+  innerFill.addColorStop(0.7, `rgba(${col},${(0.025 + ORB.energy * 0.025).toFixed(3)})`);
+  innerFill.addColorStop(1,   `rgba(${col},0.002)`);
   ctx.fillStyle = innerFill;
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+
+  // 3D sphere — specular highlight (top-left bright spot)
+  const specX = cx - R * 0.32;
+  const specY = cy - R * 0.30;
+  const specR = R * 0.38;
+  const specular = ctx.createRadialGradient(specX, specY, 0, specX, specY, specR);
+  specular.addColorStop(0,   `rgba(255,255,255,${(0.18 + ORB.energy * 0.10).toFixed(3)})`);
+  specular.addColorStop(0.3, `rgba(255,255,255,${(0.06 + ORB.energy * 0.04).toFixed(3)})`);
+  specular.addColorStop(1,   'rgba(255,255,255,0)');
+  ctx.fillStyle = specular;
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+
+  // 3D sphere — secondary specular rim (bottom-right edge light)
+  const spec2 = ctx.createRadialGradient(cx + R*0.55, cy + R*0.50, 0, cx + R*0.4, cy + R*0.4, R*0.55);
+  spec2.addColorStop(0,   `rgba(${col},${(0.12 + ORB.energy * 0.08).toFixed(3)})`);
+  spec2.addColorStop(1,   'rgba(0,0,0,0)');
+  ctx.fillStyle = spec2;
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
 
   /* ══ LAYER 5: ARC REACTOR segmented rings ══════════ */
@@ -1194,7 +1248,8 @@ async function startMicCapture() {
     scriptProc = audioCtx.createScriptProcessor(4096, 1, 1);
     scriptProc.onaudioprocess = function(e) {
       if (!sessionReady || !liveWs || liveWs.readyState !== WebSocket.OPEN) return;
-      if (!isListening || isSpeaking) return;
+      if (!isListening) return;
+      // Allow audio through even while speaking — Gemini handles barge-in
       const raw       = e.inputBuffer.getChannelData(0);
       const resampled = resampleTo16k(raw, nativeSR);
       liveWs.send(JSON.stringify({
@@ -1256,10 +1311,10 @@ function startWakeDetection() {
   wakeRec.onresult = function(e) {
     for (var i = e.resultIndex; i < e.results.length; i++) {
       var t = e.results[i][0].transcript.toLowerCase().trim();
-      if (/\b(vivek|vi vek|viveek|bivek|vibek|vivec)\b/.test(t)) {
+      if (/\b(vivek|vi vek|viveek|bivek|vibek|vivec|viveck|wivek|vivak|viwek|vi-vek|vyvek|viveg|viveck|veevek|vivek's|viveq|vybek|vivex)\b/.test(t) || /vivek/i.test(t)) {
         stopWakeDetection(); showToast('WAKE WORD DETECTED');
         txEl.textContent = 'Connecting to Gemini…'; txEl.classList.add('active');
-        var parts = t.split(/vivek|vi vek|viveek|bivek|vibek|vivec/);
+        var parts = t.split(/vivek|vi vek|viveek|bivek|vibek|vivec|viveck|wivek|vivak|viwek|vi-vek|vyvek|viveg|viveck|veevek|vivek's|viveq|vybek|vivex/i);
         var trailing = parts.slice(1).join('').replace(/[.,!?]/g, '').trim();
         startGeminiSession(trailing || null); return;
       }
@@ -1338,6 +1393,7 @@ async function startGeminiSession(initialText) {
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: p.geminiVoice || 'Charon' } } }
           },
           outputAudioTranscription: {},
+          inputAudioTranscription: {},
           realtimeInputConfig: {
             automaticActivityDetection: {
               disabled: false,
@@ -1374,7 +1430,7 @@ async function startGeminiSession(initialText) {
       if (sc.modelTurn && sc.modelTurn.parts) {
         for (const part of sc.modelTurn.parts) {
           if (part.inlineData && part.inlineData.mimeType && part.inlineData.mimeType.indexOf('audio') !== -1) {
-            if (!isSpeaking) { isSpeaking = true; stopMicCapture(); setOrbMode('speaking'); document.getElementById('stop-btn').style.display = 'block'; pulseSpeaking(); }
+            if (!isSpeaking) { isSpeaking = true; setOrbMode('speaking'); document.getElementById('stop-btn').style.display = 'block'; pulseSpeaking(); }
             playGeminiChunk(part.inlineData.data);
           }
           // gemini-3.1 native audio: text comes in part.text too (fallback)
@@ -1390,6 +1446,20 @@ async function startGeminiSession(initialText) {
         assistantBuffer += sc.outputAudioTranscription.text;
         txEl.textContent = assistantBuffer.length > 120 ? assistantBuffer.slice(0, 120) + '…' : assistantBuffer;
         txEl.classList.add('active');
+      }
+
+      // Parse color/voice changes spoken during active session
+      if (sc.inputAudioTranscription && sc.inputAudioTranscription.text) {
+        const userSaid = sc.inputAudioTranscription.text.toLowerCase();
+        parseVoiceChange(userSaid);
+        // Color change during session
+        const colorWords = userSaid.split(/\s+/);
+        const colorTrig = /\b(color|colour|orb|sphere|change|make|set)\b/.test(userSaid);
+        if (colorTrig) {
+          for (const w of colorWords) {
+            if (COLOR_MAP[w]) { setColor(COLOR_MAP[w]); break; }
+          }
+        }
       }
       if (sc.turnComplete) {
         if (assistantBuffer) { saveMessage('assistant', assistantBuffer); assistantBuffer = ''; }
