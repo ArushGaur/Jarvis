@@ -14,9 +14,11 @@ let isSpeaking   = false;
 let isDormant    = true;
 let currentSessionId = null;
 
-let liveWs       = null;
-let sessionReady = false;
-let nextPlayTime = 0;
+let liveWs        = null;
+let sessionReady  = false;
+let nextPlayTime  = 0;
+let connectFails  = 0;       // consecutive Gemini connection failures
+const MAX_FAILS   = 3;       // stop retrying after this many back-to-back failures
 
 let audioCtx     = null;
 let micStream    = null;
@@ -1347,6 +1349,7 @@ async function startGeminiSession(initialText) {
     } catch(e) { return; }
     if (data.setupComplete !== undefined) {
       clearTimeout(connTimeout); sessionReady = true;
+      connectFails = 0;  // ✅ reset on successful connection
       setOrbMode('listening'); txEl.textContent = 'Listening…'; txEl.classList.add('active');
       if (initialText) { saveMessage('user', initialText); sendTextTurn(initialText); }
       else startMicCapture();
@@ -1394,7 +1397,19 @@ async function startGeminiSession(initialText) {
   };
   ws.onclose = function() {
     clearTimeout(connTimeout); sessionReady = false; stopMicCapture();
-    if (!isDormant) { isDormant = true; setOrbMode('idle'); scheduleWakeRestart(800); }
+    if (!isDormant) {
+      isDormant = true; setOrbMode('idle');
+      connectFails++;
+      if (connectFails >= MAX_FAILS) {
+        const txEl = document.getElementById('transcript-text');
+        txEl.textContent = '❌ Gemini connection failed ' + connectFails + ' times. Check your API key in Render env vars (GEMINI_API_KEY) and ensure Gemini Live API is enabled.';
+        txEl.classList.add('active');
+        console.error('[VIVEK] Too many Gemini failures — stopping auto-retry. Fix GEMINI_API_KEY on server.');
+        // Don't restart wake detection — user must manually click orb to retry
+        return;
+      }
+      scheduleWakeRestart(800);
+    }
   };
 }
 
@@ -1470,6 +1485,6 @@ runBoot();
 canvas.addEventListener('click', function() {
   ensureAudioCtx();
   if (isSpeaking || isListening || isThinking) stopAll();
-  else if (isDormant && apiKey) startGeminiSession(null);
+  else if (isDormant && apiKey) { connectFails = 0; startGeminiSession(null); }
   else if (!apiKey) showToast('BACKEND NOT CONNECTED');
 });
