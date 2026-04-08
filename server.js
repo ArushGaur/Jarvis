@@ -269,7 +269,7 @@ const wss = new WebSocketServer({ server: httpServer, path: '/gemini-proxy' });
 
 wss.on('connection', function(clientWs) {
   console.log('[VIVEK] WebSocket client connected');
-  const geminiUrl = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=' + process.env.GEMINI_API_KEY;
+  const geminiUrl = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=' + process.env.GEMINI_API_KEY;
   const geminiWs = new WebSocket(geminiUrl); // ← this line was missing!
 
   const messageQueue = [];
