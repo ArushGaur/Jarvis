@@ -70,6 +70,14 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_messages_session 
       ON messages(session_id, timestamp)
     `);
+    // Instructions table — persistent boss instructions
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS boss_instructions (
+        id          TEXT PRIMARY KEY,
+        instruction TEXT NOT NULL,
+        created_at  INTEGER NOT NULL
+      )
+    `);
     console.log('[VIVEK] Database schema ready');
   } catch (err) {
     console.error('[VIVEK] Schema init error:', err.message);
@@ -240,6 +248,55 @@ app.get('/api/sessions/:sessionId/messages', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ─────────────────────────────────────────────────────
+//  BOSS INSTRUCTIONS — Persistent learning
+// ─────────────────────────────────────────────────────
+
+// Get all instructions
+app.get('/api/instructions', async (req, res) => {
+  if (!db) return res.json({ instructions: [] });
+  try {
+    const result = await db.execute('SELECT instruction FROM boss_instructions ORDER BY created_at ASC');
+    res.json({ instructions: result.rows.map(r => r.instruction) });
+  } catch(err) { res.json({ instructions: [] }); }
+});
+
+// Save instructions (replaces all)
+app.post('/api/instructions', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Database unavailable' });
+  try {
+    const { instructions } = req.body;
+    if (!Array.isArray(instructions)) return res.status(400).json({ error: 'instructions array required' });
+    // Clear old, insert new
+    await db.execute('DELETE FROM boss_instructions');
+    const now = Date.now();
+    for (let i = 0; i < instructions.length; i++) {
+      await db.execute({
+        sql: 'INSERT INTO boss_instructions (id, instruction, created_at) VALUES (?,?,?)',
+        args: [require('uuid').v4(), instructions[i], now + i]
+      });
+    }
+    res.json({ success: true, saved: instructions.length });
+  } catch(err) {
+    console.error('[VIVEK] Instructions save error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Add single instruction
+app.post('/api/instructions/add', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Database unavailable' });
+  try {
+    const { instruction } = req.body;
+    if (!instruction) return res.status(400).json({ error: 'instruction required' });
+    await db.execute({
+      sql: 'INSERT INTO boss_instructions (id, instruction, created_at) VALUES (?,?,?)',
+      args: [require('uuid').v4(), instruction, Date.now()]
+    });
+    res.json({ success: true });
+  } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
 // ─────────────────────────────────────────────────────
