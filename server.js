@@ -132,7 +132,9 @@ app.get('/api/sessions', async (req, res) => {
     const result = await db.execute({
       sql: `SELECT s.id, s.personality, s.created_at, s.updated_at,
                    COUNT(m.id) as message_count,
-                   MAX(m.content) FILTER (WHERE m.role='user') as last_user_msg
+                   (SELECT content FROM messages
+                    WHERE session_id = s.id AND role = 'user'
+                    ORDER BY timestamp DESC LIMIT 1) as last_user_msg
             FROM sessions s
             LEFT JOIN messages m ON m.session_id = s.id
             GROUP BY s.id
@@ -191,9 +193,20 @@ app.post('/api/sessions/:sessionId/messages', async (req, res) => {
     if (!role || !content) return res.status(400).json({ error: 'role and content required' });
     if (!['user','assistant'].includes(role)) return res.status(400).json({ error: 'role must be user or assistant' });
 
-    const id        = uuidv4();
-    const now       = Date.now();
     const sessionId = req.params.sessionId;
+
+    // Verify session exists before inserting — avoids silent FK failures
+    const sessionCheck = await db.execute({
+      sql: 'SELECT id FROM sessions WHERE id = ?',
+      args: [sessionId],
+    });
+    if (sessionCheck.rows.length === 0) {
+      console.warn('[VIVEK] Save message: session not found:', sessionId);
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const id  = uuidv4();
+    const now = Date.now();
 
     await db.execute({
       sql: 'INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (?,?,?,?,?)',
@@ -275,7 +288,7 @@ app.post('/api/instructions', async (req, res) => {
     for (let i = 0; i < instructions.length; i++) {
       await db.execute({
         sql: 'INSERT INTO boss_instructions (id, instruction, created_at) VALUES (?,?,?)',
-        args: [require('uuid').v4(), instructions[i], now + i]
+        args: [uuidv4(), instructions[i], now + i]
       });
     }
     res.json({ success: true, saved: instructions.length });
@@ -293,7 +306,7 @@ app.post('/api/instructions/add', async (req, res) => {
     if (!instruction) return res.status(400).json({ error: 'instruction required' });
     await db.execute({
       sql: 'INSERT INTO boss_instructions (id, instruction, created_at) VALUES (?,?,?)',
-      args: [require('uuid').v4(), instruction, Date.now()]
+      args: [uuidv4(), instruction, Date.now()]
     });
     res.json({ success: true });
   } catch(err) { res.status(500).json({ error: err.message }); }
@@ -331,13 +344,20 @@ wss.on('connection', function(clientWs) {
   const geminiWs = new WebSocket(geminiUrl); // ← this line was missing!
 
   const messageQueue = [];
+  const MAX_QUEUE = 200; // cap at ~8 seconds of audio to prevent memory exhaustion
   let geminiReady = false;
 
   clientWs.on('message', (msg) => {
     if (geminiReady && geminiWs.readyState === WebSocket.OPEN) {
       geminiWs.send(msg);
     } else {
-      messageQueue.push(msg);
+      if (messageQueue.length < MAX_QUEUE) {
+        messageQueue.push(msg);
+      } else {
+        // Queue full — drop oldest chunk (ring-buffer behaviour)
+        messageQueue.shift();
+        messageQueue.push(msg);
+      }
     }
   });
 
@@ -356,14 +376,24 @@ wss.on('connection', function(clientWs) {
   geminiWs.on('close', (code, reason) => {
     const reasonStr = reason ? reason.toString() : 'no reason';
     console.log(`[VIVEK] Gemini WebSocket closed — code: ${code}, reason: ${reasonStr}`);
-    if (code === 1008 || code === 4001 || code === 4003) {
+    const isAuthError = (code === 1008 || code === 4001 || code === 4003);
+    const isAbnormal  = (code !== 1000 && code !== 1001);
+    if (isAuthError) {
       console.error('[VIVEK] ❌ Gemini auth/permission error — check GEMINI_API_KEY and that Gemini Live API is enabled for your project.');
     }
     if (clientWs.readyState === WebSocket.OPEN) {
-      // Send error info to client before closing so it can display a message
-      try {
-        clientWs.send(JSON.stringify({ error: { message: `Gemini connection closed (code ${code}): ${reasonStr}` } }));
-      } catch(e) {}
+      // Only propagate error to frontend on actual error closes, NOT normal session ends.
+      // Normal close (1000/1001) means the turn finished — frontend handles reconnect itself.
+      if (isAuthError) {
+        try {
+          clientWs.send(JSON.stringify({ error: { message: `Gemini auth error (code ${code}): ${reasonStr}. Check GEMINI_API_KEY.` } }));
+        } catch(e) {}
+      } else if (isAbnormal) {
+        try {
+          clientWs.send(JSON.stringify({ error: { message: `Gemini connection dropped (code ${code}): ${reasonStr}` } }));
+        } catch(e) {}
+      }
+      // Always close the client WS so frontend reconnects
       clientWs.close();
     }
   });
@@ -396,5 +426,19 @@ initDB().then(() => {
     console.log(`[VIVEK] Neural Core backend running on port ${PORT}`);
     console.log(`[VIVEK] Turso DB: ${process.env.TURSO_DATABASE_URL ? 'CONNECTED' : 'NOT CONFIGURED'}`);
     console.log(`[VIVEK] Gemini Key: ${process.env.GEMINI_API_KEY ? 'SET ✓' : 'MISSING ✗'}`);
+
+    // ── Keep-alive self-ping for Render free tier (sleeps after 15min inactivity)
+    // Pings every 10 minutes so the server stays warm
+    const SELF_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+    setInterval(() => {
+      const http = require('http');
+      const https = require('https');
+      const mod = SELF_URL.startsWith('https') ? https : http;
+      mod.get(`${SELF_URL}/health`, (res) => {
+        console.log(`[VIVEK] Self-ping OK — status ${res.statusCode}`);
+      }).on('error', (err) => {
+        console.warn('[VIVEK] Self-ping failed:', err.message);
+      });
+    }, 10 * 60 * 1000); // every 10 minutes
   });
 });
