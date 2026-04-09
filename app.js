@@ -42,7 +42,7 @@ const AGENTS = {
     label: 'VIVEK',
     gender: 'male',
     color: 'orange',
-    geminiVoice: 'Puck',
+    geminiVoice: 'Charon',
     buildPrompt: (instructions) => `You are Vivek — the personal AI assistant of your creator. Think of yourself as a real agent like JARVIS from Iron Man.
 
 IDENTITY:
@@ -76,7 +76,7 @@ RULES:
     label: 'PRIYA',
     gender: 'female',
     color: 'pink',
-    geminiVoice: 'Aoede',
+    geminiVoice: 'Leda',
     buildPrompt: (instructions) => `You are Priya — the female AI agent of your creator. Warm, articulate, highly capable.
 
 IDENTITY:
@@ -375,7 +375,7 @@ async function speakText(text) {
   const clean = text.replace(/[*#`_~\[\]]/g, '').trim();
   if (!clean) return;
 
-  stopRecognition(); // pause mic while speaking
+  // Keep recognition running during speech so 'stop' and agent-switch commands work
   isSpeaking = true;
   setOrbMode('speaking');
   document.getElementById('stop-btn').style.display = 'block';
@@ -528,13 +528,17 @@ async function processUserInput(text) {
     messages.push({ role: 'assistant', content: reply });
     if (messages.length > 40) messages = messages.slice(-40);
 
-    // Persist to Turso DB
-    await saveMessage('user', trimmed);
-    await saveMessage('assistant', reply);
-
     isThinking = false;
     setTranscript(reply.slice(0, 120) + (reply.length > 120 ? '…' : ''));
+
+    // Fire DB saves and TTS in parallel — don't await DB before speaking
+    Promise.all([
+      saveMessage('user', trimmed),
+      saveMessage('assistant', reply),
+    ]).catch(() => {});
+
     speakText(reply);
+    return; // skip the awaited saves below
 
   } catch(err) {
     console.error('[VIVEK] Error:', err);
@@ -543,6 +547,7 @@ async function processUserInput(text) {
     const errMsg = 'Sorry Sir, kuch technical issue aa gaya. Please try again.';
     setTranscript(errMsg);
     speakText(errMsg);
+    return;
   }
 }
 
@@ -557,8 +562,38 @@ function scheduleRecRestart(delay) {
   }, delay || 500);
 }
 
+let micAnalyser = null;
+let micAnalyserBuf = null;
+
+function startMicAmplitude() {
+  // Feed real microphone amplitude into ORB.listenAmp for the listening animation
+  if (micAnalyser) return;
+  try {
+    ensureAudioCtx();
+    navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(stream => {
+      const src = audioCtx.createMediaStreamSource(stream);
+      micAnalyser = audioCtx.createAnalyser();
+      micAnalyser.fftSize = 256;
+      micAnalyserBuf = new Uint8Array(micAnalyser.frequencyBinCount);
+      src.connect(micAnalyser);
+      (function tick() {
+        if (!micAnalyser) return;
+        micAnalyser.getByteTimeDomainData(micAnalyserBuf);
+        let sum = 0;
+        for (let i = 0; i < micAnalyserBuf.length; i++) {
+          const v = (micAnalyserBuf[i] - 128) / 128;
+          sum += v * v;
+        }
+        ORB.listenAmp = Math.min(1, Math.sqrt(sum / micAnalyserBuf.length) * 8);
+        requestAnimationFrame(tick);
+      })();
+    }).catch(() => {});
+  } catch(e) {}
+}
+
 function startRecognition() {
-  if (!SpeechRec || recRunning || isSpeaking) return;
+  if (!SpeechRec || recRunning) return;
+  startMicAmplitude(); // start amplitude meter for listening animation
   try { rec = new SpeechRec(); } catch(e) { scheduleRecRestart(2000); return; }
 
   rec.continuous     = true;
@@ -575,11 +610,30 @@ function startRecognition() {
       else interim += t;
     }
 
-    if (interim) setTranscript('Hearing: ' + interim);
+    if (interim && !isSpeaking) setTranscript('Hearing: ' + interim);
 
     if (final) {
+      const norm = final.toLowerCase().replace(/[.,!?]/g, ' ').trim();
+
+      // ── PRIORITY: stop & agent-switch work even while AI is speaking ──
+      if (/\b(stop|stop it|stop karo|ruko|ruk jao|bas|bus|chup|chup karo|band karo|rukiye|rok do|ruk|khamosh|mat bolo)\b/.test(norm)) {
+        stopSpeaking(); currentTranscript = ''; return;
+      }
+      const priyaNow = /\b(priya|prya|preya|priyaa)\b/.test(norm);
+      const vivekNow = /\b(vivek|vi vek|viveek|bivek|vibek|vivec|viveck|wivek|vivak|vyvek|veevek)\b/.test(norm);
+      if (priyaNow && activeAgent !== 'priya') {
+        stopSpeaking(); currentTranscript = '';
+        switchAgent('priya'); createOrResumeSession().then(() => speakText('Haan Sir, Priya here. Kya chahiye aapko?')); return;
+      }
+      if (vivekNow && activeAgent !== 'vivek') {
+        stopSpeaking(); currentTranscript = '';
+        switchAgent('vivek'); createOrResumeSession().then(() => speakText('Yes Sir, Vivek here. How can I help?')); return;
+      }
+
+      // ── Normal: ignore input while AI is still speaking ──
+      if (isSpeaking) return;
+
       currentTranscript = (currentTranscript + ' ' + final).trim();
-      // Reset silence timer — wait 1.2s of silence before processing
       if (silenceTimer) clearTimeout(silenceTimer);
       silenceTimer = setTimeout(() => {
         const toProcess   = currentTranscript.trim();
