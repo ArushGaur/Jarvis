@@ -42,6 +42,7 @@ const AGENTS = {
     label: 'VIVEK',
     gender: 'male',
     color: 'orange',
+    geminiVoice: 'Puck',
     buildPrompt: (instructions) => `You are Vivek — the personal AI assistant of your creator. Think of yourself as a real agent like JARVIS from Iron Man.
 
 IDENTITY:
@@ -75,6 +76,7 @@ RULES:
     label: 'PRIYA',
     gender: 'female',
     color: 'pink',
+    geminiVoice: 'Aoede',
     buildPrompt: (instructions) => `You are Priya — the female AI agent of your creator. Warm, articulate, highly capable.
 
 IDENTITY:
@@ -345,61 +347,110 @@ async function callGroq(userText) {
 }
 
 /* ─────────────────────────────────────────────────────
-   TTS — Browser Speech Synthesis
+   TTS — Gemini Neural Voice (same as original Vivek)
+   Calls /api/tts on the backend which uses Gemini TTS.
+   Falls back to browser SpeechSynthesis if that fails.
 ───────────────────────────────────────────────────── */
-function speakText(text) {
-  if (!synth) return;
-  synth.cancel();
+let audioCtx = null;
+let activeAudioSource = null;
+
+function ensureAudioCtx() {
+  if (!audioCtx || audioCtx.state === 'closed') {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function base64ToFloat32(b64) {
+  const bin   = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const i16 = new Int16Array(bytes.buffer);
+  const f32 = new Float32Array(i16.length);
+  for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768;
+  return f32;
+}
+
+async function speakText(text) {
   const clean = text.replace(/[*#`_~\[\]]/g, '').trim();
   if (!clean) return;
 
-  utterance          = new SpeechSynthesisUtterance(clean);
-  const agent        = AGENTS[activeAgent];
-  utterance.pitch    = agent.gender === 'female' ? 1.15 : 0.88;
-  utterance.rate     = agent.gender === 'female' ? 0.95 : 0.92;
-  utterance.volume   = 1;
-
-  const pickVoice = () => {
-    const voices = synth.getVoices();
-    let v = null;
-    if (agent.gender === 'female') {
-      v = voices.find(v => v.lang === 'hi-IN' && v.name.toLowerCase().includes('female'))
-       || voices.find(v => v.lang === 'hi-IN')
-       || voices.find(v => v.lang.startsWith('en-IN'))
-       || voices.find(v => v.name.toLowerCase().includes('female'));
-    } else {
-      v = voices.find(v => v.lang === 'hi-IN')
-       || voices.find(v => v.lang.startsWith('en-IN'))
-       || voices.find(v => v.name.toLowerCase().includes('india'))
-       || voices.find(v => v.lang.startsWith('en-GB'))
-       || voices.find(v => v.lang.startsWith('en-'));
-    }
-    if (v) utterance.voice = v;
-  };
-  synth.getVoices().length ? pickVoice() : (synth.onvoiceschanged = pickVoice);
-
+  stopRecognition(); // pause mic while speaking
   isSpeaking = true;
   setOrbMode('speaking');
   document.getElementById('stop-btn').style.display = 'block';
   pulseSpeaking();
 
-  const onDone = () => {
-    isSpeaking   = false;
-    ORB.speakAmp = 0;
-    if (speakIv) clearInterval(speakIv);
-    document.getElementById('stop-btn').style.display = 'none';
-    setOrbMode('listening');
-    setTranscript('Listening…');
-    if (!recRunning) startRecognition();
-  };
-  utterance.onend   = onDone;
-  utterance.onerror = onDone;
+  const agent     = AGENTS[activeAgent];
+  const voiceName = agent.geminiVoice || 'Puck';
 
-  stopRecognition(); // pause mic while speaking to avoid feedback
+  try {
+    const res  = await fetch(`${BACKEND_URL}/api/tts`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ text: clean, voice: voiceName }),
+    });
+    const data = await res.json();
+    if (!data.audio) throw new Error('No audio from TTS');
+
+    ensureAudioCtx();
+    const f32 = base64ToFloat32(data.audio);
+    const buf = audioCtx.createBuffer(1, f32.length, 24000);
+    buf.getChannelData(0).set(f32);
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audioCtx.destination);
+    activeAudioSource = src;
+
+    src.onended = () => {
+      activeAudioSource = null;
+      onSpeakDone();
+    };
+    src.start();
+  } catch(err) {
+    console.warn('[VIVEK] Gemini TTS failed, falling back to browser TTS:', err.message);
+    speakBrowserFallback(clean);
+  }
+}
+
+function speakBrowserFallback(clean) {
+  if (!synth) { onSpeakDone(); return; }
+  synth.cancel();
+  utterance = new SpeechSynthesisUtterance(clean);
+  const agent = AGENTS[activeAgent];
+  utterance.pitch  = agent.gender === 'female' ? 1.15 : 0.88;
+  utterance.rate   = agent.gender === 'female' ? 0.95 : 0.92;
+  utterance.volume = 1;
+  const pickVoice = () => {
+    const voices = synth.getVoices();
+    let v = voices.find(v => v.lang.startsWith('en-IN'))
+         || voices.find(v => v.name.toLowerCase().includes('india'))
+         || voices.find(v => v.lang.startsWith('en-'));
+    if (v) utterance.voice = v;
+  };
+  synth.getVoices().length ? pickVoice() : (synth.onvoiceschanged = pickVoice);
+  utterance.onend   = onSpeakDone;
+  utterance.onerror = onSpeakDone;
   synth.speak(utterance);
 }
 
+function onSpeakDone() {
+  isSpeaking   = false;
+  ORB.speakAmp = 0;
+  if (speakIv) clearInterval(speakIv);
+  document.getElementById('stop-btn').style.display = 'none';
+  setOrbMode('listening');
+  setTranscript('Listening…');
+  if (!recRunning) startRecognition();
+}
+
 function stopSpeaking() {
+  // Stop Gemini audio
+  if (activeAudioSource) {
+    try { activeAudioSource.stop(); } catch(e) {}
+    activeAudioSource = null;
+  }
+  // Stop browser TTS fallback
   if (synth) synth.cancel();
   isSpeaking   = false;
   ORB.speakAmp = 0;
