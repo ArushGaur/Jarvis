@@ -1,7 +1,8 @@
 /* ═══════════════════════════════════════════════════════
    V.I.V.E.K — BACKEND SERVER v3.0
    - Groq LLaMA 3.3 70b for AI responses
-   - Google Search scraping for live/real-time data
+   - DuckDuckGo + Wikipedia for live/real-time data (no key needed)
+   - Gemini TTS for neural voice output
    - Turso DB for conversation history
 ═══════════════════════════════════════════════════════ */
 'use strict';
@@ -105,87 +106,111 @@ app.post('/api/chat', async (req, res) => {
 });
 
 /* ─────────────────────────────────────────────────────
-   GOOGLE SEARCH SCRAPING — live/real-time data
-   Scrapes Google search results page and extracts text
+   LIVE SEARCH — DuckDuckGo Instant Answer + Wikipedia
+   No API key needed, reliable, not blocked on servers
 ───────────────────────────────────────────────────── */
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) return res.status(400).json({ error: 'q parameter required' });
-
   try {
-    const result = await googleSearch(query);
+    const result = await liveSearch(query);
     res.json({ result });
   } catch (err) {
     console.error('[VIVEK] Search error:', err.message);
-    res.json({ result: '' }); // return empty so agent still responds
+    res.json({ result: '' });
   }
 });
 
-async function googleSearch(query) {
-  const encoded = encodeURIComponent(query);
-  const url     = `https://www.google.com/search?q=${encoded}&num=5&hl=en&gl=in`;
-
-  const html = await fetchHTML(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'en-IN,en;q=0.9,hi;q=0.8',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Cache-Control': 'no-cache',
-    }
-  });
-
-  // Extract useful text from Google's HTML
+async function liveSearch(query) {
   const snippets = [];
 
-  // Featured snippet / answer box
-  const featuredMatch = html.match(/class="[^"]*ILfuVd[^"]*"[^>]*>([\s\S]{0,600}?)<\/div>/i);
-  if (featuredMatch) {
-    const clean = stripHTML(featuredMatch[1]).trim();
-    if (clean.length > 20) snippets.push(clean);
-  }
+  // 1) DuckDuckGo Instant Answer API — free, no key, JSON
+  try {
+    const ddgUrl = 'https://api.duckduckgo.com/?q=' + encodeURIComponent(query) + '&format=json&no_html=1&skip_disambig=1';
+    const ddg = await fetchJSON(ddgUrl);
+    if (ddg.AbstractText && ddg.AbstractText.length > 20) snippets.push(ddg.AbstractText);
+    if (ddg.Answer && ddg.Answer.length > 5) snippets.push(ddg.Answer);
+    if (ddg.Definition && ddg.Definition.length > 10) snippets.push(ddg.Definition);
+    // Related topics — good for news/current events
+    for (const t of (ddg.RelatedTopics || []).slice(0, 4)) {
+      if (t.Text && t.Text.length > 20) snippets.push(t.Text);
+    }
+    if (ddg.Infobox && ddg.Infobox.content) {
+      for (const item of ddg.Infobox.content.slice(0, 4)) {
+        if (item.label && item.value) snippets.push(`${item.label}: ${item.value}`);
+      }
+    }
+  } catch(e) { console.warn('[VIVEK] DuckDuckGo failed:', e.message); }
 
-  // Knowledge panel / scores (BNeawe class used by Google for rich results)
-  const bneaweMatches = [...html.matchAll(/class="[^"]*BNeawe[^"]*"[^>]*>([\s\S]{0,400}?)<\/(?:div|span)>/gi)];
-  for (const m of bneaweMatches.slice(0, 8)) {
-    const clean = stripHTML(m[1]).trim();
-    if (clean.length > 15 && clean.length < 400 && !snippets.includes(clean)) snippets.push(clean);
-  }
+  // 2) Wikipedia Search API — good for factual / recent event questions
+  try {
+    const wikiSearch = await fetchJSON(
+      'https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=' +
+      encodeURIComponent(query) + '&utf8=1&format=json&srlimit=2'
+    );
+    const hits = wikiSearch?.query?.search || [];
+    for (const hit of hits.slice(0, 2)) {
+      // Get the extract for the top result
+      const extract = await fetchJSON(
+        'https://en.wikipedia.org/api/rest_v1/page/summary/' +
+        encodeURIComponent(hit.title.replace(/ /g, '_'))
+      );
+      if (extract?.extract && extract.extract.length > 30) {
+        snippets.push(extract.extract.slice(0, 400));
+        break; // one good Wikipedia extract is enough
+      }
+    }
+  } catch(e) { console.warn('[VIVEK] Wikipedia failed:', e.message); }
 
-  // Regular search result snippets
-  const snippetMatches = [...html.matchAll(/class="[^"]*VwiC3b[^"]*"[^>]*>([\s\S]{0,400}?)<\/div>/gi)];
-  for (const m of snippetMatches.slice(0, 5)) {
-    const clean = stripHTML(m[1]).trim();
-    if (clean.length > 30 && !snippets.includes(clean)) snippets.push(clean);
-  }
-
-  // Also try to get any score-like numbers near IPL/cricket keywords
-  if (/ipl|cricket|score|match/i.test(query)) {
-    const scoreMatch = html.match(/(\d{1,3}\/\d{1,2}|\d{1,3}-\d{1,2})[^<]{0,100}/g);
-    if (scoreMatch) snippets.push(...scoreMatch.slice(0, 3).map(s => s.trim()));
-  }
-
-  // Combine, deduplicate, limit
   const combined = [...new Set(snippets)]
-    .filter(s => s.length > 10)
+    .filter(s => s && s.length > 10)
     .slice(0, 6)
     .join(' | ');
 
-  return combined.slice(0, 1200); // max 1200 chars to Groq
+  return combined.slice(0, 1200);
 }
 
-function stripHTML(html) {
-  return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
+/* ─────────────────────────────────────────────────────
+   GEMINI TTS — Neural voice, same as original Vivek
+   Uses Gemini 2.5 Flash TTS REST endpoint
+   Returns raw PCM audio as base64 (24kHz, mono, int16)
+───────────────────────────────────────────────────── */
+app.post('/api/tts', async (req, res) => {
+  const { text, voice } = req.body;
+  if (!text) return res.status(400).json({ error: 'text required' });
+
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (!geminiKey) return res.status(503).json({ error: 'GEMINI_API_KEY not configured' });
+
+  const voiceName = voice || 'Puck'; // Puck = Vivek, Aoede = Priya
+
+  try {
+    const body = JSON.stringify({
+      contents: [{ parts: [{ text }] }],
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName } }
+        }
+      }
+    });
+
+    const ttsRes = await fetchJSON(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${geminiKey}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }
+    );
+
+    const audioData = ttsRes?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!audioData) {
+      console.error('[VIVEK] TTS: no audio in response', JSON.stringify(ttsRes).slice(0, 300));
+      return res.status(500).json({ error: 'No audio returned from Gemini TTS' });
+    }
+    res.json({ audio: audioData }); // base64 PCM 24kHz int16 mono
+  } catch(err) {
+    console.error('[VIVEK] TTS error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 /* ─────────────────────────────────────────────────────
    HTTP HELPERS
