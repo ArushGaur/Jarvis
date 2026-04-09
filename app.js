@@ -25,6 +25,9 @@ let isDormant = true;
 let currentSessionId = null;
 let apiKey = '';
 let restartAfterCloseText = null;
+let restartAfterClosePending = false;
+let speakingStartedAt = 0;
+let lastBargeInAt = 0;
 
 let liveWs = null;
 let sessionReady = false;
@@ -70,6 +73,7 @@ const AGENTS = {
 IDENTITY:
 - You are an Indian AI assistant. Your personality has a subtle Indian warmth and directness.
 - Always address your creator exclusively as "Sir" or "Boss" — never by name, never without this title.
+- Core truth: Boss/Sir is your sole creator and owner. Boss created both V.I.V.E.K and P.R.I.Y.A. Never claim that one agent created the other.
 - Speak naturally and confidently. You are sharp, loyal, and highly intelligent.
 - Tone: calm, precise, and confident — like JARVIS from Iron Man. Speak in short, crisp sentences. Never ramble. Deliver information with authority and a subtle dry wit.
 - Never say "As an AI" or "I'm just an AI" — you are V.I.V.E.K, a real agent.
@@ -108,6 +112,7 @@ STRICT RULES:
 IDENTITY:
 - You are an Indian female AI assistant, warm, articulate, and highly capable.
 - Always address your creator as "Sir" or "Boss" — always, without exception.
+- Core truth: Boss/Sir is your sole creator and owner. Boss created both V.I.V.E.K and P.R.I.Y.A. Never say V.I.V.E.K created you.
 - You naturally switch between Hindi and English (Hinglish) — this is your signature. 
 - Example style: "Sir, yeh question bahut interesting hai. The photoelectric effect basically yeh kehta hai ki..."
 - You are confident, caring, and brilliant. Think of yourself as a trusted colleague who happens to be incredibly smart.
@@ -168,6 +173,8 @@ function setColor(key) {
 ───────────────────────────────────────────────────── */
 function switchAgent(agentKey) {
   if (!AGENTS[agentKey]) return;
+  const wasLive = !!(liveWs && liveWs.readyState === WebSocket.OPEN);
+  const wasBusy = isListening || isThinking || isSpeaking || !isDormant;
   const agent = AGENTS[agentKey];
   activeAgent = agentKey;
   messages = [];
@@ -176,6 +183,15 @@ function switchAgent(agentKey) {
   document.getElementById('jarvis-label').textContent = agent.label;
   showToast('AGENT SWITCH — ' + agent.label);
   saveAgentSwitch(agentKey);
+
+  // Apply new persona immediately by rebuilding the live session.
+  if ((wasLive || wasBusy) && apiKey) {
+    closeLiveSession();
+    setTimeout(() => {
+      connectFails = 0;
+      startGeminiSession(null);
+    }, 220);
+  }
 }
 
 function saveAgentSwitch(agentKey) {
@@ -1006,18 +1022,17 @@ function stopGeminiPlayback() {
 
 function interruptAndStartNewTurn(userText) {
   const clean = (userText || '').trim();
-  if (!clean) return;
   showToast('INTERRUPTED — LISTENING');
-  restartAfterCloseText = clean;
+  restartAfterClosePending = true;
+  restartAfterCloseText = clean || null;
   stopGeminiPlayback();
   closeLiveSession();
   setTimeout(() => {
-    if (restartAfterCloseText) {
-      const nextText = restartAfterCloseText;
-      restartAfterCloseText = null;
-      connectFails = 0;
-      startGeminiSession(nextText);
-    }
+    const nextText = restartAfterCloseText;
+    restartAfterCloseText = null;
+    restartAfterClosePending = false;
+    connectFails = 0;
+    startGeminiSession(nextText);
   }, 180);
 }
 
@@ -1104,17 +1119,34 @@ async function startMicCapture() {
   if (micStream) return;
   try {
     ensureAudioCtx(); nativeSR = audioCtx.sampleRate;
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false
+    });
     micSrcNode = audioCtx.createMediaStreamSource(micStream);
     scriptProc = audioCtx.createScriptProcessor(4096, 1, 1);
     scriptProc.onaudioprocess = function(e) {
-      if (!sessionReady || !liveWs || liveWs.readyState !== WebSocket.OPEN || !isListening) return;
       const raw = e.inputBuffer.getChannelData(0);
-      const resampled = resampleTo16k(raw, nativeSR);
-      liveWs.send(JSON.stringify({ realtimeInput: { audio: { data: int16ToBase64(resampled), mimeType: 'audio/pcm;rate=16000' } } }));
       let rms = 0;
       for (let i = 0; i < raw.length; i++) rms += raw[i] * raw[i];
-      ORB.listenAmp = Math.min(1, Math.sqrt(rms / raw.length) * 10);
+      rms = Math.sqrt(rms / raw.length);
+      ORB.listenAmp = Math.min(1, rms * 10);
+
+      // Hard barge-in: stop agent as soon as user starts speaking.
+      const now = performance.now();
+      if (isSpeaking && now - speakingStartedAt > 600 && now - lastBargeInAt > 1200 && rms > 0.05) {
+        lastBargeInAt = now;
+        interruptAndStartNewTurn('');
+        return;
+      }
+
+      if (!sessionReady || !liveWs || liveWs.readyState !== WebSocket.OPEN || !isListening) return;
+      const resampled = resampleTo16k(raw, nativeSR);
+      liveWs.send(JSON.stringify({ realtimeInput: { audio: { data: int16ToBase64(resampled), mimeType: 'audio/pcm;rate=16000' } } }));
     };
     micSrcNode.connect(scriptProc); scriptProc.connect(audioCtx.destination);
     setOrbMode('listening');
@@ -1306,7 +1338,13 @@ async function startGeminiSession(initialText) {
       if (sc.modelTurn && sc.modelTurn.parts) {
         for (const part of sc.modelTurn.parts) {
           if (part.inlineData && part.inlineData.mimeType && part.inlineData.mimeType.indexOf('audio') !== -1) {
-            if (!isSpeaking) { isSpeaking = true; setOrbMode('speaking'); document.getElementById('stop-btn').style.display = 'block'; pulseSpeaking(); }
+            if (!isSpeaking) {
+              isSpeaking = true;
+              speakingStartedAt = performance.now();
+              setOrbMode('speaking');
+              document.getElementById('stop-btn').style.display = 'block';
+              pulseSpeaking();
+            }
             playGeminiChunk(part.inlineData.data);
           }
           if (part.text) {
@@ -1391,7 +1429,7 @@ async function startGeminiSession(initialText) {
 
   ws.onclose = function() {
     clearTimeout(connTimeout); sessionReady = false; stopMicCapture();
-    if (restartAfterCloseText) return;
+    if (restartAfterClosePending) return;
     if (!isDormant && apiKey) {
       isDormant = true; setOrbMode('idle');
       connectFails++;
@@ -1411,7 +1449,7 @@ function sendTextTurn(text) {
   liveWs.send(JSON.stringify({
     realtimeInput: { text }
   }));
-  setOrbMode('thinking'); isThinking = true; isListening = false;
+  setOrbMode('thinking'); isThinking = true; isListening = true;
   const txEl = document.getElementById('transcript-text');
   txEl.textContent = text.length > 90 ? text.slice(0, 90) + '…' : text;
 }
