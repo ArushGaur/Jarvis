@@ -164,8 +164,11 @@ const ORB = {
   speakAmp:0, listenAmp:0,
   phase:0, rotY:0, depthAngle:0,
   scanAngle:0, hexFrameAngle:0,
-  waveform: new Float32Array(128),
+  waveform: new Float32Array(256),
   reactorArcs: [], orbitRings: [], circuitNodes: [], dataStreams: [], arcBolts: [],
+  particles: [], latticePoints: [], dnaHelixOffset: 0,
+  nebulaPoints: [], energyTendrils: [], polarGrid: [],
+  quantumRings: [], coreRipples: [],
 };
 
 function resizeCanvas() {
@@ -181,37 +184,111 @@ function resizeCanvas() {
 function initOrbElements() {
   const R = ORB.R;
   ORB.reactorArcs = [
-    { r:0.30, startAngle:0,         endAngle:Math.PI*0.6,  offset:0, baseAlpha:0.8, pulse:0,   width:2.0 },
-    { r:0.30, startAngle:Math.PI,   endAngle:Math.PI*1.6,  offset:0, baseAlpha:0.8, pulse:1.5, width:2.0 },
-    { r:0.55, startAngle:0.3,       endAngle:Math.PI*0.9,  offset:0, baseAlpha:0.5, pulse:0.5, width:1.2 },
-    { r:0.55, startAngle:Math.PI+0.3, endAngle:Math.PI*1.9,offset:0, baseAlpha:0.5, pulse:2.0, width:1.2 },
-    { r:0.75, startAngle:0,         endAngle:Math.PI*2,    offset:0, baseAlpha:0.2, pulse:0.8, width:0.8 },
+    { r:0.22, startAngle:0,           endAngle:Math.PI*0.5,  offset:0, baseAlpha:0.9, pulse:0,   width:2.5 },
+    { r:0.22, startAngle:Math.PI,     endAngle:Math.PI*1.5,  offset:0, baseAlpha:0.9, pulse:1.5, width:2.5 },
+    { r:0.42, startAngle:0.3,         endAngle:Math.PI*0.8,  offset:0, baseAlpha:0.6, pulse:0.5, width:1.8 },
+    { r:0.42, startAngle:Math.PI+0.3, endAngle:Math.PI*1.8,  offset:0, baseAlpha:0.6, pulse:2.0, width:1.8 },
+    { r:0.62, startAngle:0,           endAngle:Math.PI*0.6,  offset:0, baseAlpha:0.4, pulse:1.0, width:1.2 },
+    { r:0.62, startAngle:Math.PI,     endAngle:Math.PI*1.6,  offset:0, baseAlpha:0.4, pulse:2.5, width:1.2 },
+    { r:0.78, startAngle:0,           endAngle:Math.PI*2,    offset:0, baseAlpha:0.2, pulse:0.8, width:0.8 },
   ];
   ORB.orbitRings = [
-    { r:1.35, angle:0, tiltX:0.4, tiltZ:0.2,  alpha:0.3, width:1.0, dashes:[6,8],  glyphs:3 },
-    { r:1.65, angle:0, tiltX:1.0, tiltZ:-0.3, alpha:0.2, width:0.7, dashes:[3,12], glyphs:4 },
-    { r:1.90, angle:0, tiltX:0.6, tiltZ:0.5,  alpha:0.15,width:0.5, dashes:[],     glyphs:0 },
+    { r:1.35, angle:0, tiltX:0.4,  tiltZ:0.2,  alpha:0.35, width:1.2, dashes:[6,8],  glyphs:4 },
+    { r:1.60, angle:0, tiltX:1.0,  tiltZ:-0.3, alpha:0.25, width:0.9, dashes:[3,12], glyphs:5 },
+    { r:1.85, angle:0, tiltX:0.6,  tiltZ:0.5,  alpha:0.18, width:0.6, dashes:[],     glyphs:3 },
+    { r:2.10, angle:0, tiltX:-0.8, tiltZ:0.1,  alpha:0.12, width:0.4, dashes:[2,16], glyphs:0 },
   ];
-  ORB.circuitNodes = Array.from({ length: 12 }, (_, i) => ({
-    angle: (Math.PI * 2 * i) / 12,
-    r: 0.75 + Math.random() * 0.35,
+  ORB.circuitNodes = Array.from({ length: 18 }, (_, i) => ({
+    angle: (Math.PI * 2 * i) / 18,
+    r: 0.70 + Math.random() * 0.40,
     x: 0, y: 0,
-    size: 1.5 + Math.random() * 2,
+    size: 1.5 + Math.random() * 2.5,
     opacity: 0.4 + Math.random() * 0.6,
     pSpeed: 0.5 + Math.random() * 2,
     pulse: Math.random() * Math.PI * 2,
-    connections: [Math.floor(Math.random() * 12), Math.floor(Math.random() * 12)],
+    connections: [Math.floor(Math.random() * 18), Math.floor(Math.random() * 18)],
   }));
-  ORB.dataStreams = Array.from({ length: 8 }, (_, i) => ({
-    angle: (Math.PI * 2 * i) / 8 + Math.random() * 0.3,
-    startR: 0.2 + Math.random() * 0.3,
-    length: 0.4 + Math.random() * 0.5,
+  ORB.dataStreams = Array.from({ length: 12 }, (_, i) => ({
+    angle: (Math.PI * 2 * i) / 12 + Math.random() * 0.3,
+    startR: 0.15 + Math.random() * 0.25,
+    length: 0.4 + Math.random() * 0.6,
     progress: Math.random(),
     speed: 0.003 + Math.random() * 0.007,
-    width: 0.8 + Math.random() * 1.2,
+    width: 0.8 + Math.random() * 1.4,
     opacity: 0.3 + Math.random() * 0.5,
   }));
-  ORB.arcBolts = Array.from({ length: 4 }, () => ({ active:false, points:[], timer:0, interval:0 }));
+  ORB.arcBolts = Array.from({ length: 6 }, () => ({ active:false, points:[], timer:0, interval:0 }));
+
+  // Floating particles around the orb
+  ORB.particles = Array.from({ length: 80 }, () => {
+    const angle = Math.random() * Math.PI * 2;
+    const inclination = Math.acos(2 * Math.random() - 1);
+    const dist = 0.85 + Math.random() * 0.7;
+    return {
+      baseAngle: angle, inclination, dist,
+      orbitSpeed: (Math.random() - 0.5) * 0.008,
+      orbitAxis: Math.random() * Math.PI * 2,
+      size: 0.8 + Math.random() * 2.0,
+      opacity: 0.2 + Math.random() * 0.7,
+      pulse: Math.random() * Math.PI * 2,
+      pSpeed: 0.5 + Math.random() * 3.0,
+      driftX: (Math.random() - 0.5) * 0.002,
+      driftY: (Math.random() - 0.5) * 0.002,
+    };
+  });
+
+  // 3D sphere lattice — icosphere-like grid points
+  ORB.latticePoints = [];
+  const stacks = 10, slices = 16;
+  for (let st = 0; st <= stacks; st++) {
+    for (let sl = 0; sl < slices; sl++) {
+      const phi   = (Math.PI * st) / stacks;
+      const theta = (Math.PI * 2 * sl) / slices;
+      ORB.latticePoints.push({ phi, theta, speed: 0.003 + Math.random() * 0.004, phase: Math.random() * Math.PI * 2 });
+    }
+  }
+
+  // Nebula cloud points inside sphere
+  ORB.nebulaPoints = Array.from({ length: 120 }, () => ({
+    angle: Math.random() * Math.PI * 2,
+    r: Math.random() * 0.75,
+    y: (Math.random() - 0.5) * 1.4,
+    size: 2 + Math.random() * 6,
+    opacity: 0.03 + Math.random() * 0.12,
+    drift: (Math.random() - 0.5) * 0.004,
+    driftY: (Math.random() - 0.5) * 0.003,
+    vAngle: Math.random() * Math.PI * 2,
+  }));
+
+  // Energy tendrils shooting from core
+  ORB.energyTendrils = Array.from({ length: 6 }, (_, i) => ({
+    angle: (Math.PI * 2 * i) / 6 + Math.random() * 0.5,
+    segments: 8 + Math.floor(Math.random() * 6),
+    length: 0.5 + Math.random() * 0.4,
+    width: 0.6 + Math.random() * 0.8,
+    phase: Math.random() * Math.PI * 2,
+    speed: 0.02 + Math.random() * 0.03,
+    wiggle: 0.1 + Math.random() * 0.2,
+    opacity: 0.4 + Math.random() * 0.5,
+  }));
+
+  // Quantum rings (tilted differently from orbit rings, inside the sphere boundary)
+  ORB.quantumRings = Array.from({ length: 5 }, (_, i) => ({
+    r: 0.35 + i * 0.13,
+    tiltX: Math.random() * Math.PI,
+    tiltZ: Math.random() * Math.PI,
+    speed: (0.3 + Math.random() * 0.5) * (Math.random() > 0.5 ? 1 : -1),
+    angle: Math.random() * Math.PI * 2,
+    alpha: 0.15 + Math.random() * 0.25,
+    width: 0.5 + Math.random() * 0.8,
+    dashes: Math.random() > 0.5 ? [4, 6] : [],
+  }));
+
+  // Core ripples
+  ORB.coreRipples = Array.from({ length: 4 }, (_, i) => ({
+    progress: i / 4,
+    speed: 0.006 + Math.random() * 0.004,
+  }));
 }
 
 function updateOrbPhysics() {
@@ -238,11 +315,37 @@ function updateOrbPhysics() {
     if (ds.progress > 1) ds.progress = 0;
   }
 
-  // Waveform
+  // Waveform — doubled resolution
   const wLen = ORB.waveform.length;
   for (let i = 0; i < wLen; i++) {
-    const target = ORB.mode >= 1 ? (Math.sin(ORB.phase * 3 + i * 0.4) * 0.3 + Math.sin(ORB.phase * 7 + i * 0.9) * 0.15) * ORB.energy : 0;
+    const target = ORB.mode >= 1 ? (Math.sin(ORB.phase * 3 + i * 0.25) * 0.35 + Math.sin(ORB.phase * 7 + i * 0.6) * 0.18 + Math.sin(ORB.phase * 13 + i * 1.1) * 0.08) * ORB.energy : 0;
     ORB.waveform[i] += (target - ORB.waveform[i]) * 0.12;
+  }
+
+  // Animate particles
+  for (const p of ORB.particles) {
+    p.baseAngle += p.orbitSpeed * (1 + ORB.energy * 0.5);
+    p.orbitAxis += p.driftX;
+  }
+
+  // DNA helix
+  ORB.dnaHelixOffset += dt * 0.4 * (1 + ORB.energy * 0.8);
+
+  // Quantum rings
+  for (const qr of ORB.quantumRings) {
+    qr.angle += dt * qr.speed * (1 + ORB.energy * 0.4);
+  }
+
+  // Core ripples
+  for (const cr of ORB.coreRipples) {
+    cr.progress += cr.speed * (1 + ORB.energy * 1.5);
+    if (cr.progress > 1) cr.progress = 0;
+  }
+
+  // Nebula drift
+  for (const nb of ORB.nebulaPoints) {
+    nb.angle += nb.drift * (1 + ORB.energy);
+    nb.vAngle += 0.003;
   }
 
   // Orb size pulse
@@ -300,7 +403,82 @@ function drawJarvisInterface() {
   energyGlow.addColorStop(0.35,`rgba(${col},${(0.04 + ORB.energy * 0.10).toFixed(3)})`);
   energyGlow.addColorStop(1,   'rgba(0,0,0,0)');
   ctx.fillStyle = energyGlow; ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
-  ctx.restore();
+
+  // ── Nebula clouds inside sphere ──
+  for (const nb of ORB.nebulaPoints) {
+    const nx = cx + Math.cos(nb.angle) * nb.r * R;
+    const ny = cy + Math.sin(nb.vAngle * 0.7) * nb.y * R * 0.5 + Math.cos(nb.angle * 0.5) * nb.r * R * 0.3;
+    const nalpha = nb.opacity * (0.5 + ORB.energy * 0.7);
+    const grad = ctx.createRadialGradient(nx, ny, 0, nx, ny, nb.size * (1 + ORB.energy));
+    grad.addColorStop(0, `rgba(${col},${nalpha.toFixed(3)})`);
+    grad.addColorStop(1, `rgba(${col},0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(nx, ny, nb.size * (1 + ORB.energy), 0, Math.PI * 2); ctx.fill();
+  }
+
+  // ── 3D sphere lattice grid ──
+  const latAlpha = (0.08 + ORB.energy * 0.14).toFixed(3);
+  for (let i = 0; i < ORB.latticePoints.length; i++) {
+    const lp = ORB.latticePoints[i];
+    const theta = lp.theta + ORB.rotY * lp.speed * 20;
+    const phi   = lp.phi;
+    const lx = cx + Math.sin(phi) * Math.cos(theta) * R * 0.92;
+    const ly = cy + Math.cos(phi) * R * 0.92;
+    // Connect to neighbor in same stack
+    const next = ORB.latticePoints[(i + 1) % ORB.latticePoints.length];
+    const nt = next.theta + ORB.rotY * next.speed * 20;
+    if (Math.abs(next.phi - lp.phi) < 0.01) {
+      const nx2 = cx + Math.sin(next.phi) * Math.cos(nt) * R * 0.92;
+      const ny2 = cy + Math.cos(next.phi) * R * 0.92;
+      ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(nx2, ny2);
+      ctx.strokeStyle = `rgba(${col},${latAlpha})`; ctx.lineWidth = 0.4; ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(lx, ly, 1.2, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${col},${(parseFloat(latAlpha) * 2.5).toFixed(3)})`; ctx.fill();
+  }
+
+  // ── DNA double helix (vertical through sphere) ──
+  const helixSteps = 48;
+  for (let strand = 0; strand < 2; strand++) {
+    const phaseOff = strand * Math.PI;
+    ctx.beginPath();
+    for (let s = 0; s <= helixSteps; s++) {
+      const t  = s / helixSteps;
+      const hy = cy - R * 0.85 + t * R * 1.7;
+      const ha = ORB.dnaHelixOffset + t * Math.PI * 4 + phaseOff;
+      const hr = R * 0.28 * Math.sin(t * Math.PI); // taper at poles
+      const hx = cx + Math.cos(ha) * hr;
+      s === 0 ? ctx.moveTo(hx, hy) : ctx.lineTo(hx, hy);
+    }
+    const dnaAlpha = (0.12 + ORB.energy * 0.2).toFixed(3);
+    ctx.strokeStyle = `rgba(${col},${dnaAlpha})`; ctx.lineWidth = 1.0 + ORB.energy * 0.5; ctx.stroke();
+  }
+  // Rungs connecting the two helices
+  for (let s = 0; s <= helixSteps; s += 2) {
+    const t = s / helixSteps;
+    const hy = cy - R * 0.85 + t * R * 1.7;
+    const ha1 = ORB.dnaHelixOffset + t * Math.PI * 4;
+    const ha2 = ha1 + Math.PI;
+    const hr  = R * 0.28 * Math.sin(t * Math.PI);
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(ha1) * hr, hy);
+    ctx.lineTo(cx + Math.cos(ha2) * hr, hy);
+    ctx.strokeStyle = `rgba(${col},${(0.07 + ORB.energy * 0.12).toFixed(3)})`; ctx.lineWidth = 0.6; ctx.stroke();
+  }
+
+  // ── Quantum rings (inside sphere) ──
+  for (const qr of ORB.quantumRings) {
+    const qR = qr.r * R;
+    const scY = Math.abs(Math.sin(qr.tiltX + ORB.depthAngle * 0.2)) * 0.6 + 0.15;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(qr.angle + qr.tiltZ); ctx.scale(1, scY);
+    const qa = qr.alpha * (0.5 + ORB.energy * 0.8);
+    ctx.beginPath(); ctx.arc(0, 0, qR, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(${col},${qa.toFixed(3)})`; ctx.lineWidth = qr.width;
+    ctx.setLineDash(qr.dashes); ctx.stroke(); ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  ctx.restore(); // end sphere clip
 
   // Rim
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2);
@@ -370,7 +548,52 @@ function drawJarvisInterface() {
     ctx.restore();
   }
 
-  // Scan sweep
+  // Energy tendrils
+  if (ORB.energy > 0.1) {
+    for (const td of ORB.energyTendrils) {
+      td.phase += td.speed;
+      const tAlpha = td.opacity * ORB.energy;
+      if (tAlpha < 0.05) continue;
+      ctx.beginPath();
+      const tStartR = R * 0.12;
+      ctx.moveTo(cx + Math.cos(td.angle) * tStartR, cy + Math.sin(td.angle) * tStartR);
+      for (let s = 1; s <= td.segments; s++) {
+        const t  = s / td.segments;
+        const tr = tStartR + t * td.length * R;
+        const ta = td.angle + Math.sin(td.phase + t * 5) * td.wiggle * (1 - t);
+        ctx.lineTo(cx + Math.cos(ta) * tr, cy + Math.sin(ta) * tr);
+      }
+      const tGrad = ctx.createLinearGradient(
+        cx + Math.cos(td.angle) * tStartR, cy + Math.sin(td.angle) * tStartR,
+        cx + Math.cos(td.angle) * (tStartR + td.length * R), cy + Math.sin(td.angle) * (tStartR + td.length * R)
+      );
+      tGrad.addColorStop(0, `rgba(${col},${tAlpha.toFixed(3)})`);
+      tGrad.addColorStop(1, `rgba(${col},0)`);
+      ctx.strokeStyle = tGrad; ctx.lineWidth = td.width * (0.5 + ORB.energy); ctx.stroke();
+    }
+  }
+
+  // Floating particles around orb
+  for (const p of ORB.particles) {
+    const px = cx + Math.cos(p.baseAngle) * Math.sin(p.inclination) * p.dist * R;
+    const py = cy + Math.cos(p.inclination) * p.dist * R * 0.6 + Math.sin(p.baseAngle + p.orbitAxis) * p.dist * R * 0.25;
+    const pAlpha = p.opacity * (0.3 + ORB.energy * 0.5) * (0.5 + Math.sin(ORB.phase * p.pSpeed + p.pulse) * 0.5);
+    const ps = p.size * (0.6 + ORB.energy * 0.6);
+    const pGlow = ctx.createRadialGradient(px, py, 0, px, py, ps * 2);
+    pGlow.addColorStop(0, `rgba(${col},${Math.min(1, pAlpha * 1.5).toFixed(3)})`);
+    pGlow.addColorStop(1, `rgba(${col},0)`);
+    ctx.fillStyle = pGlow; ctx.beginPath(); ctx.arc(px, py, ps * 2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = `rgba(${col},${Math.min(1, pAlpha).toFixed(3)})`; ctx.beginPath(); ctx.arc(px, py, ps * 0.5, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Core ripples
+  for (const cr of ORB.coreRipples) {
+    const crR = R * (0.05 + cr.progress * 1.1);
+    const crA = Math.max(0, (0.3 - cr.progress * 0.3) * (0.4 + ORB.energy * 0.6));
+    if (crA < 0.005) continue;
+    ctx.beginPath(); ctx.arc(cx, cy, crR, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(${col},${crA.toFixed(3)})`; ctx.lineWidth = 1.5 * (1 - cr.progress); ctx.stroke();
+  }
   ctx.save(); ctx.translate(cx, cy);
   ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, R * 2, ORB.scanAngle - 0.6, ORB.scanAngle); ctx.closePath();
   const sweepA = 0.03 + ORB.energy * 0.04;
@@ -379,16 +602,29 @@ function drawJarvisInterface() {
   sweep.addColorStop(1, `rgba(${col},0)`);
   ctx.fillStyle = sweep; ctx.fill(); ctx.restore();
 
-  // Hex frames
-  const hexFR = R * 1.08;
-  ctx.save(); ctx.translate(cx, cy); ctx.rotate(ORB.hexFrameAngle);
-  for (let s = 0; s < 6; s++) {
-    const a1 = (Math.PI * 2 * s) / 6, a2 = (Math.PI * 2 * (s + 1)) / 6;
-    ctx.beginPath(); ctx.moveTo(Math.cos(a1) * hexFR, Math.sin(a1) * hexFR);
-    ctx.lineTo(Math.cos(a2) * hexFR, Math.sin(a2) * hexFR);
-    ctx.strokeStyle = `rgba(${col},${(0.35 + ORB.energy * 0.3).toFixed(3)})`; ctx.lineWidth = 1.0; ctx.stroke();
+  // Hex frames — double layer
+  for (let layer = 0; layer < 2; layer++) {
+    const hexFR = R * (1.08 + layer * 0.08);
+    const hexRot = ORB.hexFrameAngle * (layer === 0 ? 1 : -0.7) + layer * (Math.PI / 6);
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(hexRot);
+    const hexAlpha = (layer === 0 ? 0.35 : 0.18) + ORB.energy * 0.25;
+    for (let s = 0; s < 6; s++) {
+      const a1 = (Math.PI * 2 * s) / 6, a2 = (Math.PI * 2 * (s + 1)) / 6;
+      ctx.beginPath(); ctx.moveTo(Math.cos(a1) * hexFR, Math.sin(a1) * hexFR);
+      ctx.lineTo(Math.cos(a2) * hexFR, Math.sin(a2) * hexFR);
+      ctx.strokeStyle = `rgba(${col},${hexAlpha.toFixed(3)})`; ctx.lineWidth = layer === 0 ? 1.2 : 0.6; ctx.stroke();
+    }
+    ctx.restore();
   }
-  ctx.restore();
+
+  // Outer glow halo rings
+  for (let h = 1; h <= 3; h++) {
+    const hR = R * (1.05 + h * 0.06);
+    const hA = (0.08 - h * 0.02) * (0.5 + ORB.energy * 0.5);
+    if (hA <= 0) continue;
+    ctx.beginPath(); ctx.arc(cx, cy, hR, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(${col},${hA.toFixed(3)})`; ctx.lineWidth = 3 - h * 0.5; ctx.stroke();
+  }
 
   // Waveform
   if (ORB.mode >= 1 || ORB.energy > 0.15) {
@@ -852,7 +1088,7 @@ async function startGeminiSession(initialText) {
     if (liveWs !== ws) { ws.close(); return; }
     ws.send(JSON.stringify({
       setup: {
-        model: 'models/gemini-2.0-flash-live-001',
+        model: 'models/gemini-live-2.5-flash-preview',
         generationConfig: {
           responseModalities: ['AUDIO'],
           speechConfig: {
