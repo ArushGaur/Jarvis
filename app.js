@@ -168,7 +168,9 @@ STRICT RULES:
 LIVE DATA: When Boss asks about cricket/IPL scores or news/headlines, call the live data API:
 - Use the /api/live/cricket endpoint for cricket scores, match updates, IPL
 - Use the /api/live/news endpoint for latest news and headlines
-- Present the information in your own voice with context.`
+- Present the information in your own voice with context.
+
+GRAPH/PLOT CAPABILITY: You have a built-in Desmos graph calculator. When Boss asks you to plot, graph, draw, or visualize any equation or function — say something like "Sir, opening the graph for you right now." or "Boss, Desmos calculator kholte hain — graph ready hoga abhi." NEVER say you cannot draw or plot. The system will automatically open the Desmos graph popup. You just need to verbally confirm you are opening it.`
   },
 
   priya: {
@@ -208,7 +210,9 @@ ${instructions.length > 0 ? `Boss has given these instructions that you must alw
 STRICT RULES:
 - Never give raw textbook answers. Always in your warm Hinglish personality.
 - Keep responses focused and helpful — don't over-explain.
-- If Boss gives an instruction, acknowledge in Hindi+English and follow it permanently.`
+- If Boss gives an instruction, acknowledge in Hindi+English and follow it permanently.
+
+GRAPH/PLOT CAPABILITY: You have a built-in Desmos graph calculator. When Boss asks you to plot, graph, draw, or visualize any equation or function — say something like "Sir, graph abhi open ho raha hai." or "Boss, Desmos calculator mein plot kar deti hoon — abhi dikhega." NEVER say you cannot draw or visualize. The system will automatically open the Desmos graph popup. Just confirm verbally that you are opening it.`
   }
 };
 
@@ -1658,13 +1662,7 @@ async function startGeminiSession(initialText) {
 
         // Graph request - open Desmos
         if (isGraphRequest(userSaid)) {
-          let equation = '';
-          // Extract equation from user speech (simple patterns)
-          const eqMatch = userSaid.match(/y\s*=\s*([^,.\n]+)/i) ||
-                       userSaid.match(/(y\s*=\s*[^,.\n]+)/i) ||
-                       userSaid.match(/(x\^?[^,.\n]+)/i);
-          if (eqMatch) equation = eqMatch[1] || eqMatch[0];
-          
+          let equation = extractEquationFromSpeech(userSaid);
           openDesmosGraph(equation);
           showToast('GRAPH OPENED');
         }
@@ -1775,38 +1773,81 @@ function showToast(msg) {
 ───────────────────────────────────────────────────── */
 function openDesmosGraph(equation) {
   const modal = document.getElementById('desmos-modal');
+  const frame = document.getElementById('desmos-frame');
   const txEl = document.getElementById('transcript-text');
   
-  // Build Desmos URL with equation
+  // Build Desmos URL with equation pre-loaded
   let desmosUrl = 'https://www.desmos.com/calculator';
-  if (equation) {
-    const encoded = encodeURIComponent(equation.replace(/ /g, ''));
+  if (equation && equation.trim()) {
+    const encoded = encodeURIComponent(equation.trim().replace(/ /g, ''));
     desmosUrl += '?q=' + encoded;
   }
   
-  console.log('[VIVEK] Opening Desmos:', desmosUrl);
+  console.log('[VIVEK] Opening Desmos in modal:', desmosUrl);
   
-  // Try popup first, fallback to new tab
-  const popup = window.open(desmosUrl, '_blank', 'width=1000,height=700');
-  if (popup && !popup.closed) {
-    if (txEl) { txEl.textContent = 'Graph opened in new window'; txEl.classList.add('active'); }
-  } else {
-    // Fallback: try direct URL
-    window.location.href = desmosUrl;
+  // Load into the iframe inside the modal
+  if (frame) {
+    frame.src = desmosUrl;
   }
   
-  if (modal) modal.classList.add('show');
+  // Show the modal
+  if (modal) {
+    modal.classList.add('show');
+    // Ensure modal is styled for full visibility
+    modal.style.display = 'flex';
+  }
+  
+  if (txEl) { txEl.textContent = 'Graph opened — Sir'; txEl.classList.add('active'); }
 }
 
 function closeDesmosModal() {
   const modal = document.getElementById('desmos-modal');
-  if (modal) modal.classList.remove('show');
+  const frame = document.getElementById('desmos-frame');
+  if (modal) {
+    modal.classList.remove('show');
+    modal.style.display = '';
+  }
+  // Clear iframe so it stops loading
+  if (frame) frame.src = 'about:blank';
+}
+
+function extractEquationFromSpeech(text) {
+  // Normalize spoken math: "x squared" -> "x^2", "x cubed" -> "x^3", etc.
+  let t = text
+    .replace(/\bsquared\b/gi, '^2')
+    .replace(/\bcubed\b/gi, '^3')
+    .replace(/\bto the power of (\d+)\b/gi, '^$1')
+    .replace(/\bsquare root of\b/gi, 'sqrt')
+    .replace(/\btimes\b/gi, '*')
+    .replace(/\bdivided by\b/gi, '/')
+    .replace(/\bplus\b/gi, '+')
+    .replace(/\bminus\b/gi, '-')
+    .replace(/\bpi\b/gi, 'pi')
+    .replace(/\bsine\b/gi, 'sin')
+    .replace(/\bcosine\b/gi, 'cos')
+    .replace(/\btangent\b/gi, 'tan')
+    .replace(/\bnatural log\b/gi, 'ln')
+    .replace(/\blog\b/gi, 'log');
+
+  // Try to extract "y = ..." or "f(x) = ..."
+  let m = t.match(/(?:y|f\s*\(\s*x\s*\))\s*=\s*([^,.\n?]+)/i);
+  if (m) return ('y=' + m[1].trim()).replace(/\s+/g, '');
+
+  // Try "plot/graph/draw <expression>"
+  m = t.match(/(?:plot|graph|draw|show|visualize)\s+(?:the\s+)?(?:graph\s+of\s+)?([x\d\s+\-*/^()sincostanlnlogpi.]+)/i);
+  if (m) return m[1].trim().replace(/\s+/g, '');
+
+  // Try any x-based expression
+  m = t.match(/([0-9]*x[\s\d+\-*/^()sincostanlnlogpi.^]+)/i);
+  if (m) return m[1].trim().replace(/\s+/g, '');
+
+  return ''; // open blank calculator if nothing found
 }
 
 function isGraphRequest(text) {
   const t = text.toLowerCase();
-  return /\b(graph|plot|draw|equation|function|y=|x\^|sin|cos|tan|linear|parabola|quadratic)\b/.test(t) ||
-         /\b(बनाओ|ग्राफ|plot karo|graph bana)\b/.test(t);
+  return /\b(graph|plot|draw|equation|function|y=|x\^|sin|cos|tan|linear|parabola|quadratic|curve|visualize|show me the graph|show graph|open graph|open desmos|desmos)\b/.test(t) ||
+         /\b(बनाओ|ग्राफ|plot karo|graph bana|graph dikhao|graph kholo|graph banao|curve dikhao)\b/.test(t);
 }
 
 /* ─────────────────────────────────────────────────────
