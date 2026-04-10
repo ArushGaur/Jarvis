@@ -17,6 +17,7 @@ let spotifyPlayer       = null;
 let spotifyDeviceId     = null;
 let spotifyReady        = false;
 let spotifyInitStarted  = false;
+let spotifyNeedsPremium = false;
 let currentTrackInfo    = null;
 
 // Load Spotify SDK once on page load
@@ -65,9 +66,9 @@ async function initSpotifyPlayer() {
       }
     });
 
-    spotifyPlayer.addListener('initialization_error', ({ message }) => console.error('[VIVEK] Spotify init error:', message));
-    spotifyPlayer.addListener('authentication_error', ({ message }) => console.error('[VIVEK] Spotify auth error:', message));
-    spotifyPlayer.addListener('account_error',        ({ message }) => console.error('[VIVEK] Spotify account error (Premium needed):', message));
+    spotifyPlayer.addListener('initialization_error', ({ message }) => { console.error('[VIVEK] Spotify init error:', message); showToast('SPOTIFY INIT ERROR: ' + message); });
+    spotifyPlayer.addListener('authentication_error', ({ message }) => { console.error('[VIVEK] Spotify auth error:', message); showToast('SPOTIFY AUTH ERROR — Re-visit /auth/spotify'); });
+    spotifyPlayer.addListener('account_error',        ({ message }) => { console.error('[VIVEK] Spotify account error (Premium needed):', message); spotifyNeedsPremium = true; showToast('SPOTIFY: PREMIUM ACCOUNT REQUIRED'); });
 
     await spotifyPlayer.connect();
     console.log('[VIVEK] Spotify player connected');
@@ -82,12 +83,23 @@ async function playSpotify(songName) {
     // Search for track via backend
     const searchRes = await fetch(BACKEND_URL + '/api/spotify/search?q=' + encodeURIComponent(songName));
     const track     = await searchRes.json();
-    if (track.error) { console.warn('[VIVEK] Spotify search error:', track.error); return; }
+    if (track.error) { console.warn('[VIVEK] Spotify search error:', track.error); showToast('TRACK NOT FOUND: ' + songName); return; }
+
+    console.log('[VIVEK] Found track:', track.name, '| URI:', track.uri, '| Premium needed:', spotifyNeedsPremium, '| Ready:', spotifyReady);
+
+    // If no Premium or SDK not ready — open in Spotify web/app directly
+    if (spotifyNeedsPremium || !spotifyReady || !spotifyDeviceId) {
+      const spotifyUrl = 'https://open.spotify.com/track/' + track.uri.split(':')[2];
+      window.open(spotifyUrl, '_blank');
+      showToast('OPENING IN SPOTIFY: ' + track.name.toUpperCase());
+      console.log('[VIVEK] Opened Spotify web player:', spotifyUrl);
+      return;
+    }
 
     // Get fresh token
-    const tokenRes = await fetch(BACKEND_URL + '/api/spotify/token');
+    const tokenRes  = await fetch(BACKEND_URL + '/api/spotify/token');
     const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) return;
+    if (!tokenData.access_token) { showToast('SPOTIFY TOKEN ERROR'); return; }
 
     // Activate player (satisfies browser autoplay policy)
     if (spotifyPlayer && spotifyPlayer.activateElement) {
@@ -105,9 +117,12 @@ async function playSpotify(songName) {
     });
 
     if (!playRes.ok) {
-      const err = await playRes.json().catch(() => ({}));
-      console.error('[VIVEK] Spotify play failed:', playRes.status, err);
-      showToast('SPOTIFY ERROR: ' + (err.error?.message || playRes.status));
+      const errData = await playRes.json().catch(() => ({}));
+      console.error('[VIVEK] Spotify play failed:', playRes.status, errData);
+      // Fallback: open in Spotify web player
+      const spotifyUrl = 'https://open.spotify.com/track/' + track.uri.split(':')[2];
+      window.open(spotifyUrl, '_blank');
+      showToast('OPENING IN SPOTIFY APP: ' + track.name.toUpperCase());
       return;
     }
 
@@ -116,6 +131,7 @@ async function playSpotify(songName) {
     console.log('[VIVEK] Playing:', track.name, 'by', track.artist);
   } catch(err) {
     console.error('[VIVEK] playSpotify error:', err);
+    showToast('SPOTIFY ERROR — CHECK CONSOLE');
   }
 }
 
@@ -1947,9 +1963,7 @@ function showToast(msg) {
    DESMOS GRAPH CALCULATOR
 ───────────────────────────────────────────────────── */
 function openDesmosGraph(equation) {
-  const modal  = document.getElementById('desmos-modal');
-  const frame  = document.getElementById('desmos-frame');
-  const txEl   = document.getElementById('transcript-text');
+  const txEl = document.getElementById('transcript-text');
 
   let expr = '';
   if (equation && equation.trim()) {
@@ -1957,12 +1971,11 @@ function openDesmosGraph(equation) {
     if (!/^[a-zA-Z]\s*=/.test(expr)) expr = 'y=' + expr;
   }
 
-  // Build graph page as a self-contained blob — no backend needed, works even if Render is sleeping
+  // Build self-contained Desmos page as blob
   const html = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>VIVEK Graph</title>
   <script src="https://www.desmos.com/api/v1.9/calculator.js?apiKey=003d4029b0d741db8dfa66ddd9bc6983"><\/script>
   <style>
@@ -1984,21 +1997,32 @@ function openDesmosGraph(equation) {
 </body>
 </html>`;
 
-  const blob = new Blob([html], { type: 'text/html' });
+  const blob    = new Blob([html], { type: 'text/html' });
   const blobUrl = URL.createObjectURL(blob);
 
-  console.log('[VIVEK] Loading graph with equation:', expr);
+  // Open as a proper popup window — draggable, resizable, independent
+  const popup = window.open(
+    blobUrl,
+    'VivekGraph',
+    'width=900,height=650,left=100,top=80,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no'
+  );
 
-  if (frame) {
-    // Revoke previous blob URL to avoid memory leak
-    if (frame._blobUrl) URL.revokeObjectURL(frame._blobUrl);
-    frame._blobUrl = blobUrl;
-    frame.src = blobUrl;
-  }
-
-  if (modal) {
-    modal.style.display = 'flex';
-    modal.classList.add('show');
+  // Revoke blob URL after popup loads to free memory
+  if (popup) {
+    popup.addEventListener('load', () => URL.revokeObjectURL(blobUrl), { once: true });
+    popup.focus();
+    console.log('[VIVEK] Graph popup opened, equation:', expr || '(empty)');
+  } else {
+    // Popup blocked — fall back to modal
+    console.warn('[VIVEK] Popup blocked, falling back to modal');
+    const modal = document.getElementById('desmos-modal');
+    const frame = document.getElementById('desmos-frame');
+    if (frame) {
+      if (frame._blobUrl) URL.revokeObjectURL(frame._blobUrl);
+      frame._blobUrl = blobUrl;
+      frame.src = blobUrl;
+    }
+    if (modal) { modal.style.display = 'flex'; modal.classList.add('show'); }
   }
 
   if (txEl) { txEl.textContent = 'Graph opened — Sir'; txEl.classList.add('active'); }
