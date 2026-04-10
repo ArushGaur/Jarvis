@@ -1771,44 +1771,91 @@ function showToast(msg) {
 /* ─────────────────────────────────────────────────────
    DESMOS GRAPH CALCULATOR
 ───────────────────────────────────────────────────── */
+/* ── Desmos API instance (created once, reused) ── */
+let desmosCalculator = null;
+
 function openDesmosGraph(equation) {
   const modal = document.getElementById('desmos-modal');
-  const frame = document.getElementById('desmos-frame');
+  const container = document.getElementById('desmos-frame');
   const txEl = document.getElementById('transcript-text');
-  
-  // Build Desmos URL with equation pre-loaded
-  let desmosUrl = 'https://www.desmos.com/calculator';
-  if (equation && equation.trim()) {
-    const encoded = encodeURIComponent(equation.trim().replace(/ /g, ''));
-    desmosUrl += '?q=' + encoded;
+
+  if (!modal || !container) {
+    console.error('[VIVEK] Desmos modal or container not found');
+    return;
   }
-  
-  console.log('[VIVEK] Opening Desmos in modal:', desmosUrl);
-  
-  // Load into the iframe inside the modal
-  if (frame) {
-    frame.src = desmosUrl;
+
+  // Show the modal first so the container has dimensions
+  modal.classList.add('show');
+  modal.style.display = 'flex';
+
+  // Load Desmos API script if not already loaded
+  if (typeof Desmos === 'undefined') {
+    const script = document.createElement('script');
+    script.src = 'https://www.desmos.com/api/v1.9/calculator.js?apiKey=003d4029b0d741db8dfa66ddd9bc6983';
+    script.onload = function() {
+      initDesmosCalculator(container, equation);
+    };
+    script.onerror = function() {
+      console.error('[VIVEK] Failed to load Desmos API');
+      container.innerHTML = '<div style="color:#ff9a00;padding:20px;font-family:monospace;">Failed to load Desmos. Check your internet connection.</div>';
+    };
+    document.head.appendChild(script);
+  } else {
+    initDesmosCalculator(container, equation);
   }
-  
-  // Show the modal
-  if (modal) {
-    modal.classList.add('show');
-    // Ensure modal is styled for full visibility
-    modal.style.display = 'flex';
-  }
-  
+
   if (txEl) { txEl.textContent = 'Graph opened — Sir'; txEl.classList.add('active'); }
+}
+
+function initDesmosCalculator(container, equation) {
+  // Destroy previous instance if exists
+  if (desmosCalculator) {
+    try { desmosCalculator.destroy(); } catch(e) {}
+    desmosCalculator = null;
+  }
+
+  // Clear container
+  container.innerHTML = '';
+
+  // Init Desmos calculator
+  desmosCalculator = Desmos.GraphingCalculator(container, {
+    keypad: true,
+    expressions: true,
+    settingsMenu: true,
+    zoomButtons: true,
+    expressionsTopbar: true,
+    border: false,
+    backgroundColor: '#0a0500',
+    textColor: '#ff9a00',
+    colors: {
+      label: '#ff9a00'
+    }
+  });
+
+  // Set equation if provided
+  if (equation && equation.trim()) {
+    // Clean up the equation
+    let expr = equation.trim();
+    // If it doesn't start with y= or is a standalone expression, wrap it
+    if (!/^y\s*=/i.test(expr) && !/^[a-zA-Z]\s*=/.test(expr)) {
+      expr = 'y=' + expr;
+    }
+    console.log('[VIVEK] Plotting equation:', expr);
+    desmosCalculator.setExpression({ id: 'graph1', latex: expr });
+  }
 }
 
 function closeDesmosModal() {
   const modal = document.getElementById('desmos-modal');
-  const frame = document.getElementById('desmos-frame');
   if (modal) {
     modal.classList.remove('show');
     modal.style.display = '';
   }
-  // Clear iframe so it stops loading
-  if (frame) frame.src = 'about:blank';
+  // Destroy calculator to free memory
+  if (desmosCalculator) {
+    try { desmosCalculator.destroy(); } catch(e) {}
+    desmosCalculator = null;
+  }
 }
 
 function extractEquationFromSpeech(text) {
