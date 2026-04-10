@@ -79,10 +79,10 @@ app.post('/api/chat', async (req, res) => {
 
   try {
     const body = JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
+      model: 'llama-3.3-70b-specdec',
       messages: messages,
-      max_tokens: 300,
-      temperature: 0.7,
+      max_tokens: 500,
+      temperature: 0.75,
       stream: false,
     });
 
