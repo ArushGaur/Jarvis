@@ -1966,19 +1966,37 @@ function openDesmosGraph(equation) {
   const expr = (equation && equation.trim()) ? equation.trim() : '';
   const url = 'graph.html' + (expr ? '?eq=' + encodeURIComponent(expr) : '');
 
-  // Anchor click opens new tab reliably even from async voice callbacks
-  const a = document.createElement('a');
-  a.href = url;
-  a.target = '_blank';
-  a.rel = 'noopener';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  // Browsers block window.open from async/WebSocket callbacks.
+  // Show a full-screen tap overlay — the user tap IS a real gesture,
+  // so window.open succeeds when they tap.
+  const existing = document.getElementById('graph-overlay');
+  if (existing) existing.remove();
 
-  showToast('GRAPH OPENED');
+  const overlay = document.createElement('div');
+  overlay.id = 'graph-overlay';
+  overlay.style.cssText = [
+    'position:fixed','inset:0','z-index:99999',
+    'background:rgba(10,10,26,0.92)',
+    'display:flex','flex-direction:column',
+    'align-items:center','justify-content:center',
+    'cursor:pointer',
+    "font-family:'Orbitron',monospace"
+  ].join(';');
+  overlay.innerHTML =
+    '<div style="color:#ff9a00;font-size:22px;letter-spacing:.2em;margin-bottom:18px;">⬡ GRAPH READY</div>' +
+    '<div style="color:#fff;font-size:14px;background:rgba(255,154,0,0.12);border:1px solid rgba(255,154,0,0.5);padding:10px 28px;border-radius:4px;letter-spacing:.1em;margin-bottom:28px;">' + (expr || 'Desmos Calculator') + '</div>' +
+    '<div style="color:#ff9a00;font-size:13px;letter-spacing:.15em;opacity:.7;animation:gp 1s infinite;">TAP ANYWHERE TO OPEN GRAPH</div>' +
+    '<style>@keyframes gp{0%,100%{opacity:.4}50%{opacity:1}}</style>';
+
+  overlay.addEventListener('click', function () {
+    window.open(url, '_blank');
+    overlay.remove();
+  });
+  document.body.appendChild(overlay);
+
   const txEl = document.getElementById('transcript-text');
-  if (txEl) { txEl.textContent = 'Graph opened in new tab — Sir'; txEl.classList.add('active'); }
-  console.log('[VIVEK] Graph tab opened:', url);
+  if (txEl) { txEl.textContent = 'Tap screen to open graph — Sir'; txEl.classList.add('active'); }
+  console.log('[VIVEK] Graph overlay shown for:', url);
 }
 
 
