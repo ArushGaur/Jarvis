@@ -1963,63 +1963,24 @@ function showToast(msg) {
    DESMOS GRAPH CALCULATOR
 ───────────────────────────────────────────────────── */
 function openDesmosGraph(equation) {
-  const txEl  = document.getElementById('transcript-text');
-  const modal = document.getElementById('desmos-modal');
-  const frame = document.getElementById('desmos-frame');
-
   let expr = '';
   if (equation && equation.trim()) {
     expr = equation.trim();
     if (!/^[a-zA-Z]\s*=/.test(expr)) expr = 'y=' + expr;
   }
 
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>VIVEK Graph</title>
-  <script src="https://www.desmos.com/api/v1.9/calculator.js?apiKey=003d4029b0d741db8dfa66ddd9bc6983"><\/script>
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    html, body { width:100%; height:100%; background:#1a1a2e; }
-    #calculator { width:100%; height:100%; }
-  </style>
-</head>
-<body>
-  <div id="calculator"></div>
-  <script>
-    var elt = document.getElementById('calculator');
-    var calculator = Desmos.GraphingCalculator(elt, {
-      keypad: true, expressions: true, settingsMenu: true, zoomButtons: true, border: false
-    });
-    var eq = ${JSON.stringify(expr)};
-    if (eq) calculator.setExpression({ id: 'g1', latex: eq });
-  <\/script>
-</body>
-</html>`;
+  // Build Desmos URL and open directly in a new tab — no iframe/blob needed
+  const baseUrl = 'https://www.desmos.com/calculator';
+  const url = expr
+    ? baseUrl + '?equation=' + encodeURIComponent(expr)
+    : baseUrl;
 
-  const blob    = new Blob([html], { type: 'text/html' });
-  const blobUrl = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+  showToast('GRAPH OPENED — ' + (expr || 'DESMOS'));
 
-  if (frame) {
-    if (frame._blobUrl) URL.revokeObjectURL(frame._blobUrl);
-    frame._blobUrl = blobUrl;
-    frame.src      = blobUrl;
-  }
-  if (modal) {
-    modal.style.display = 'flex';
-    modal.classList.add('show');
-  }
-
+  const txEl = document.getElementById('transcript-text');
   if (txEl) { txEl.textContent = 'Graph opened — Sir'; txEl.classList.add('active'); }
-  console.log('[VIVEK] Graph modal opened, equation:', expr || '(empty)');
-}
-
-function closeDesmosModal() {
-  const modal = document.getElementById('desmos-modal');
-  const frame = document.getElementById('desmos-frame');
-  if (modal) { modal.style.display = ''; modal.classList.remove('show'); }
-  if (frame) frame.src = 'about:blank';
+  console.log('[VIVEK] Desmos opened:', url);
 }
 
 function extractEquationFromSpeech(text) {
