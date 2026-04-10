@@ -1352,13 +1352,14 @@ function startWakeDetection() {
       const vivekWake = /\b(vivek|vi vek|viveek|bivek|vibek|vivec|viveck|wivek|vivak|vyvek|veevek)\b/i.test(t);
       const priyaWake = /\b(priya|prya|preya|priyaa)\b/i.test(t);
       
-      // Switch to Priya if "call priya" / "switch to priya" detected
+      // Switch to Priya if "priya" detected (only if not already on Priya)
       if (priyaWake && activeAgent !== 'priya') {
         stopWakeDetection(); switchAgent('priya');
         const trailing = t.split(/priya/i).slice(1).join('').replace(/[.,!?]/g, '').trim();
         startGeminiSession(trailing || null); return;
       }
-      if (vivekWake && activeAgent === 'priya') {
+      // Switch to Vivek if "vivek" detected (only if not already on Vivek)
+      if (vivekWake && activeAgent !== 'vivek') {
         stopWakeDetection(); switchAgent('vivek');
         const trailing = t.split(/vivek/i).slice(1).join('').replace(/[.,!?]/g, '').trim();
         startGeminiSession(trailing || null); return;
@@ -1531,9 +1532,11 @@ async function startGeminiSession(initialText) {
           return; // DO NOT save to DB, DO NOT let Gemini respond
         }
 
-        if (cmd === 'SWITCH_PRIYA' && activeAgent !== 'priya') {
-          // Set restartAfterClosePending BEFORE closeLiveSession so ws.onclose
-          // doesn't spawn a competing reconnect loop that races with our setTimeout.
+        // Agent switching commands - always process regardless of current agent
+        const textSwitchesPriya = /\b(priya|prya|preya|priyaa|call priya|switch to priya)\b/i.test(normalized);
+        const textSwitchesVivek = /\b(vivek|vi vek|viveek|switch to vivek|call vivek)\b/i.test(normalized);
+        
+        if (textSwitchesPriya && activeAgent !== 'priya') {
           stopCurrentResponseOnly();
           restartAfterClosePending = true;
           switchAgent('priya');
@@ -1544,10 +1547,10 @@ async function startGeminiSession(initialText) {
             connectFails = 0;
             startGeminiSession(null);
           }, 400);
-          return; // DO NOT save to DB, DO NOT let Gemini respond
+          return;
         }
 
-        if (cmd === 'SWITCH_VIVEK' && activeAgent !== 'vivek') {
+        if (textSwitchesVivek && activeAgent !== 'vivek') {
           stopCurrentResponseOnly();
           restartAfterClosePending = true;
           switchAgent('vivek');
@@ -1558,7 +1561,7 @@ async function startGeminiSession(initialText) {
             connectFails = 0;
             startGeminiSession(null);
           }, 400);
-          return; // DO NOT save to DB, DO NOT let Gemini respond
+          return;
         }
 
         // ── Normal utterance — save to DB ──
