@@ -30,12 +30,10 @@
 <!-- VIVEK LABEL -->
 <div id="jarvis-label">V.I.V.E.K</div>
 
-<!-- AGENT SWITCH (TOP RIGHT) -->
-<button id="agent-switch-top" onclick="switchAgentToggle()" title="Switch Agent (P key)">⇄ SWITCH</button>
-
 <!-- AGENT INDICATOR -->
 <div id="agent-indicator">
   <span id="agent-gender-icon">♂ V.I.V.E.K</span>
+  <button id="agent-switch-btn" onclick="switchAgentToggle()" title="Switch Agent (P key)">⇄ SWITCH</button>
 </div>
 
 <!-- AGENT LABEL (hidden, used for JS reference) -->
@@ -72,6 +70,19 @@
 
 <!-- TOAST NOTIFICATION -->
 <div id="toast"></div>
+
+<!-- DESMOS GRAPH MODAL -->
+<div id="desmos-modal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span>GRAPH CALCULATOR</span>
+      <button class="modal-close" onclick="closeDesmosModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <iframe id="desmos-frame" src="about:blank" allow="clipboard-read; clip-board-write"></iframe>
+    </div>
+  </div>
+</div>
 
 <script>
 function switchAgentToggle() {
