@@ -11,6 +11,146 @@
 const BACKEND_URL = 'https://vivek-qqwu.onrender.com';
 
 /* ─────────────────────────────────────────────────────
+   SPOTIFY WEB PLAYBACK SDK
+───────────────────────────────────────────────────── */
+let spotifyPlayer       = null;
+let spotifyDeviceId     = null;
+let spotifyReady        = false;
+let spotifyInitStarted  = false;
+let currentTrackInfo    = null;
+
+// Load Spotify SDK once on page load
+function loadSpotifySDK() {
+  if (spotifyInitStarted) return;
+  spotifyInitStarted = true;
+  window.onSpotifyWebPlaybackSDKReady = initSpotifyPlayer;
+  const script = document.createElement('script');
+  script.src = 'https://sdk.scdn.co/spotify-player.js';
+  document.head.appendChild(script);
+}
+
+async function initSpotifyPlayer() {
+  try {
+    const res  = await fetch(BACKEND_URL + '/api/spotify/token');
+    const data = await res.json();
+    if (!data.access_token) { console.warn('[VIVEK] Spotify not authenticated'); return; }
+
+    spotifyPlayer = new Spotify.Player({
+      name: 'VIVEK Neural Interface',
+      getOAuthToken: async cb => {
+        // Always get a fresh token from backend
+        const r = await fetch(BACKEND_URL + '/api/spotify/token');
+        const d = await r.json();
+        cb(d.access_token);
+      },
+      volume: 0.8,
+    });
+
+    spotifyPlayer.addListener('ready', ({ device_id }) => {
+      spotifyDeviceId = device_id;
+      spotifyReady    = true;
+      console.log('[VIVEK] Spotify ready, device:', device_id);
+    });
+
+    spotifyPlayer.addListener('not_ready', () => {
+      spotifyReady = false;
+      console.warn('[VIVEK] Spotify player went offline');
+    });
+
+    spotifyPlayer.addListener('player_state_changed', state => {
+      if (!state) return;
+      const track = state.track_window && state.track_window.current_track;
+      if (track) {
+        currentTrackInfo = { name: track.name, artist: track.artists.map(a => a.name).join(', ') };
+      }
+    });
+
+    spotifyPlayer.addListener('initialization_error', ({ message }) => console.error('[VIVEK] Spotify init error:', message));
+    spotifyPlayer.addListener('authentication_error', ({ message }) => console.error('[VIVEK] Spotify auth error:', message));
+    spotifyPlayer.addListener('account_error',        ({ message }) => console.error('[VIVEK] Spotify account error (Premium needed):', message));
+
+    await spotifyPlayer.connect();
+    console.log('[VIVEK] Spotify player connected');
+  } catch(err) {
+    console.error('[VIVEK] Spotify player error:', err);
+  }
+}
+
+async function playSpotify(songName) {
+  if (!songName) return;
+  try {
+    // Search for track via backend
+    const searchRes = await fetch(BACKEND_URL + '/api/spotify/search?q=' + encodeURIComponent(songName));
+    const track     = await searchRes.json();
+    if (track.error) { console.warn('[VIVEK] Spotify search error:', track.error); return; }
+
+    // Get fresh token
+    const tokenRes = await fetch(BACKEND_URL + '/api/spotify/token');
+    const tokenData = await tokenRes.json();
+    if (!tokenData.access_token) return;
+
+    // Play on our SDK device
+    await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + spotifyDeviceId, {
+      method: 'PUT',
+      headers: {
+        'Authorization': 'Bearer ' + tokenData.access_token,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({ uris: [track.uri] }),
+    });
+
+    currentTrackInfo = { name: track.name, artist: track.artist };
+    showToast('NOW PLAYING: ' + track.name.toUpperCase());
+    console.log('[VIVEK] Playing:', track.name, 'by', track.artist);
+  } catch(err) {
+    console.error('[VIVEK] playSpotify error:', err);
+  }
+}
+
+async function pauseSpotify() {
+  if (spotifyPlayer) await spotifyPlayer.pause();
+}
+
+async function resumeSpotify() {
+  if (spotifyPlayer) await spotifyPlayer.resume();
+}
+
+async function skipSpotify() {
+  if (spotifyPlayer) await spotifyPlayer.nextTrack();
+}
+
+function isMusicRequest(text) {
+  const t = text.toLowerCase();
+  return /\b(play|bajao|chala|laga|music|song|gana|gaana|sunao|suno|start music|play music|play song)\b/.test(t);
+}
+
+function isPauseRequest(text) {
+  const t = text.toLowerCase();
+  return /\b(pause|roko|band karo music|music band|music rok|stop music|stop song)\b/.test(t);
+}
+
+function isResumeRequest(text) {
+  const t = text.toLowerCase();
+  return /\b(resume|phir se chala|music resume|wapas chala|continue music)\b/.test(t);
+}
+
+function isSkipRequest(text) {
+  const t = text.toLowerCase();
+  return /\b(skip|next|agla|next song|skip this|next track)\b/.test(t);
+}
+
+function extractSongName(text) {
+  // Remove filler words and extract song name
+  return text
+    .replace(/\b(play|bajao|chala|laga|sunao|suno|please|sir|boss|gana|gaana|song|music|track|wala|wali|de do|laga do|baja do|chala do)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Kick off Spotify SDK load immediately
+loadSpotifySDK();
+
+/* ─────────────────────────────────────────────────────
    ACTIVE AGENT SYSTEM
    'vivek' = male, Indian accent, English
    'priya' = female, Hindi+English mixed
@@ -171,6 +311,8 @@ LIVE DATA: When Boss asks about cricket/IPL scores or news/headlines, call the l
 - Present the information in your own voice with context.
 
 GRAPH/PLOT CAPABILITY: You have a built-in Desmos graph calculator. When Boss asks you to plot, graph, draw, or visualize any equation or function — say something like "Sir, opening the graph for you right now." or "Boss, Desmos calculator kholte hain — graph ready hoga abhi." NEVER say you cannot draw or plot. The system will automatically open the Desmos graph popup. You just need to verbally confirm you are opening it.`
+
+MUSIC CAPABILITY: You can play any song on Spotify directly in the browser. When Boss says "play [song name]", respond like "Sir, playing [song] right now." or "Boss, [song] laga deta hoon abhi." For pause say "Pausing, Sir." For resume say "Resuming, Sir." For skip/next say "Skipping, Sir." NEVER say you cannot play music. The system handles it automatically.
   },
 
   priya: {
@@ -213,6 +355,8 @@ STRICT RULES:
 - If Boss gives an instruction, acknowledge in Hindi+English and follow it permanently.
 
 GRAPH/PLOT CAPABILITY: You have a built-in Desmos graph calculator. When Boss asks you to plot, graph, draw, or visualize any equation or function — say something like "Sir, graph abhi open ho raha hai." or "Boss, Desmos calculator mein plot kar deti hoon — abhi dikhega." NEVER say you cannot draw or visualize. The system will automatically open the Desmos graph popup. Just confirm verbally that you are opening it.`
+
+MUSIC CAPABILITY: You can play any song on Spotify. When Boss says "play [song]", respond warmly like "Sir, [song] laga deti hoon abhi!" For pause say "Roka, Sir." For next/skip say "Next track, Sir." NEVER say you cannot play music. The system handles it automatically.
   }
 };
 
@@ -1667,6 +1811,25 @@ async function startGeminiSession(initialText) {
           showToast('GRAPH OPENED');
         }
 
+        // Music request — Spotify playback
+        if (isMusicRequest(userSaid)) {
+          if (!spotifyReady) {
+            showToast('SPOTIFY NOT READY — VISIT /auth/spotify');
+          } else {
+            const songName = extractSongName(userSaid);
+            if (songName.length > 1) playSpotify(songName);
+          }
+        } else if (isPauseRequest(userSaid)) {
+          pauseSpotify();
+          showToast('MUSIC PAUSED');
+        } else if (isResumeRequest(userSaid)) {
+          resumeSpotify();
+          showToast('MUSIC RESUMED');
+        } else if (isSkipRequest(userSaid)) {
+          skipSpotify();
+          showToast('SKIPPING TRACK');
+        }
+
         // Color change (non-command, agent can respond)
         const colorWords = normalized.split(/\s+/);
         if (/\b(color|colour|orb|change|make|set)\b/.test(normalized)) {
@@ -1772,26 +1935,37 @@ function showToast(msg) {
    DESMOS GRAPH CALCULATOR
 ───────────────────────────────────────────────────── */
 function openDesmosGraph(equation) {
-  const txEl = document.getElementById('transcript-text');
+  const modal  = document.getElementById('desmos-modal');
+  const frame  = document.getElementById('desmos-frame');
+  const txEl   = document.getElementById('transcript-text');
 
-  let url = 'https://www.desmos.com/calculator';
+  // Build URL to our own /graph endpoint (same-origin — no iframe block)
+  let url = BACKEND_URL + '/graph';
   if (equation && equation.trim()) {
-    // Clean up equation
     let expr = equation.trim();
-    if (!/^y\s*=/i.test(expr) && !/^[a-zA-Z]\s*=/.test(expr)) {
-      expr = 'y=' + expr;
-    }
-    url += '?q=' + encodeURIComponent(expr);
+    if (!/^[a-zA-Z]\s*=/.test(expr)) expr = 'y=' + expr;
+    url += '?eq=' + encodeURIComponent(expr);
   }
 
-  console.log('[VIVEK] Opening Desmos window:', url);
-  window.open(url, 'DesmosGraph', 'width=1000,height=700,left=100,top=100,resizable=yes,scrollbars=yes');
+  console.log('[VIVEK] Loading graph:', url);
+
+  // Load into iframe
+  if (frame) frame.src = url;
+
+  // Show the modal overlay
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.classList.add('show');
+  }
 
   if (txEl) { txEl.textContent = 'Graph opened — Sir'; txEl.classList.add('active'); }
 }
 
 function closeDesmosModal() {
-  // No modal used — Desmos opens in its own window
+  const modal = document.getElementById('desmos-modal');
+  const frame = document.getElementById('desmos-frame');
+  if (modal) { modal.style.display = ''; modal.classList.remove('show'); }
+  if (frame) frame.src = 'about:blank';
 }
 
 function extractEquationFromSpeech(text) {
