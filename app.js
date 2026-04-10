@@ -1963,7 +1963,9 @@ function showToast(msg) {
    DESMOS GRAPH CALCULATOR
 ───────────────────────────────────────────────────── */
 function openDesmosGraph(equation) {
-  const txEl = document.getElementById('transcript-text');
+  const txEl  = document.getElementById('transcript-text');
+  const modal = document.getElementById('desmos-modal');
+  const frame = document.getElementById('desmos-frame');
 
   let expr = '';
   if (equation && equation.trim()) {
@@ -1971,7 +1973,6 @@ function openDesmosGraph(equation) {
     if (!/^[a-zA-Z]\s*=/.test(expr)) expr = 'y=' + expr;
   }
 
-  // Build self-contained Desmos page as blob
   const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -2000,32 +2001,18 @@ function openDesmosGraph(equation) {
   const blob    = new Blob([html], { type: 'text/html' });
   const blobUrl = URL.createObjectURL(blob);
 
-  // Open as a proper popup window — draggable, resizable, independent
-  const popup = window.open(
-    blobUrl,
-    'VivekGraph',
-    'width=900,height=650,left=100,top=80,resizable=yes,scrollbars=no,toolbar=no,menubar=no,location=no,status=no'
-  );
-
-  // Revoke blob URL after popup loads to free memory
-  if (popup) {
-    popup.addEventListener('load', () => URL.revokeObjectURL(blobUrl), { once: true });
-    popup.focus();
-    console.log('[VIVEK] Graph popup opened, equation:', expr || '(empty)');
-  } else {
-    // Popup blocked — fall back to modal
-    console.warn('[VIVEK] Popup blocked, falling back to modal');
-    const modal = document.getElementById('desmos-modal');
-    const frame = document.getElementById('desmos-frame');
-    if (frame) {
-      if (frame._blobUrl) URL.revokeObjectURL(frame._blobUrl);
-      frame._blobUrl = blobUrl;
-      frame.src = blobUrl;
-    }
-    if (modal) { modal.style.display = 'flex'; modal.classList.add('show'); }
+  if (frame) {
+    if (frame._blobUrl) URL.revokeObjectURL(frame._blobUrl);
+    frame._blobUrl = blobUrl;
+    frame.src      = blobUrl;
+  }
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.classList.add('show');
   }
 
   if (txEl) { txEl.textContent = 'Graph opened — Sir'; txEl.classList.add('active'); }
+  console.log('[VIVEK] Graph modal opened, equation:', expr || '(empty)');
 }
 
 function closeDesmosModal() {
