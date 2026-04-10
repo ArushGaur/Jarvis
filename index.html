@@ -72,6 +72,18 @@
 <!-- TOAST NOTIFICATION -->
 <div id="toast"></div>
 
+<!-- MUSIC BAR -->
+<div id="music-bar">
+  <input id="music-input" type="text" placeholder="Song name…" autocomplete="off" spellcheck="false"
+    onkeydown="if(event.key==='Enter') musicBarPlay()">
+  <button id="music-play-btn" onclick="musicBarPlay()">▶ PLAY</button>
+  <button id="music-pause-btn" onclick="pauseSpotify(); showToast('PAUSED')">⏸</button>
+  <button id="music-skip-btn" onclick="skipSpotify(); showToast('SKIPPED')">⏭</button>
+</div>
+
+<!-- GRAPH BUTTON -->
+<button id="graph-btn" onclick="openDesmosGraph('')" title="Open Graph Calculator">⬡ GRAPH</button>
+
 <!-- DESMOS GRAPH MODAL -->
 <div id="desmos-modal" class="modal">
   <div class="modal-content">
@@ -87,6 +99,17 @@
 </div>
 
 <script>
+function musicBarPlay() {
+  const input = document.getElementById('music-input');
+  const song  = input.value.trim();
+  if (!song) { showToast('TYPE A SONG NAME FIRST'); return; }
+  if (typeof playSpotify === 'function') {
+    playSpotify(song);
+    input.value = '';
+  } else {
+    showToast('PLAYER NOT READY YET');
+  }
+}
 function switchAgentToggle() {
   if (typeof activeAgent !== 'undefined') {
     if (activeAgent === 'vivek') switchAgent('priya');
