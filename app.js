@@ -16,6 +16,48 @@ const BACKEND_URL = 'https://vivek-qqwu.onrender.com';
    'priya' = female, Hindi+English mixed
 ───────────────────────────────────────────────────── */
 let activeAgent = 'vivek';  // default: male
+
+/* ─────────────────────────────────────────────────────
+   LIVE DATA SYSTEM (Cricket & News)
+───────────────────────────────────────────────────── */
+let cachedLiveData = { cricket: null, news: null, lastFetch: 0 };
+const LIVE_DATA_TTL = 30000; // 30 seconds cache
+
+async function fetchLiveCricket() {
+  if (cachedLiveData.cricket && Date.now() - cachedLiveData.lastFetch < LIVE_DATA_TTL) {
+    return cachedLiveData.cricket;
+  }
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/live/cricket`);
+    const data = await res.json();
+    cachedLiveData.cricket = data;
+    cachedLiveData.lastFetch = Date.now();
+    return data;
+  } catch(e) {
+    return cachedLiveData.cricket || { matches: [] };
+  }
+}
+
+async function fetchLiveNews() {
+  if (cachedLiveData.news && Date.now() - cachedLiveData.lastFetch < LIVE_DATA_TTL) {
+    return cachedLiveData.news;
+  }
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/live/news`);
+    const data = await res.json();
+    cachedLiveData.news = data;
+    cachedLiveData.lastFetch = Date.now();
+    return data;
+  } catch(e) {
+    return cachedLiveData.news || { articles: [] };
+  }
+}
+
+function isLiveDataRequest(text) {
+  const t = text.toLowerCase();
+  return /\b(cricket|match|score|ipl|t20|world cup|odi|test|match ki|score karo|cricket ka|score bata|match ki latest)\b/.test(t) ||
+         /\b(news|aj ka|khabar|headline|today|latest|breaking|aj ki|today ka|top news|main khabar)\b/.test(t);
+}
 let learnedInstructions = []; // persisted instructions boss gave
 let messages = [];
 
@@ -121,7 +163,12 @@ STRICT RULES:
 - Never be sycophantic or over-complimentary.
 - Keep responses concise but complete. Don't ramble.
 - If Boss gives you an instruction or preference, acknowledge it and remember it for all future interactions.
-- If Boss says something like "from now on", "always", "never", "remember this" — treat it as a permanent instruction.`
+- If Boss says something like "from now on", "always", "never", "remember this" — treat it as a permanent instruction.
+
+LIVE DATA: When Boss asks about cricket/IPL scores or news/headlines, call the live data API:
+- Use the /api/live/cricket endpoint for cricket scores, match updates, IPL
+- Use the /api/live/news endpoint for latest news and headlines
+- Present the information in your own voice with context.`
   },
 
   priya: {
@@ -1427,8 +1474,25 @@ async function startGeminiSession(initialText) {
   assistantBuffer = '';
   await createSession();
 
+  // Fetch live data if initialText contains a request
+  let liveContext = '';
+  if (initialText && isLiveDataRequest(initialText)) {
+    const txEl = document.getElementById('transcript-text');
+    txEl.textContent = 'Fetching live data…'; txEl.classList.add('active');
+    try {
+      if (/\b(cricket|match|score|ipl|t20|world cup|odi|test)\b/i.test(initialText)) {
+        const cricket = await fetchLiveCricket();
+        liveContext = '\n\nLIVE CRICKET DATA: ' + JSON.stringify(cricket);
+      }
+      if (/\b(news|headline|latest|breaking)\b/i.test(initialText)) {
+        const news = await fetchLiveNews();
+        liveContext = '\n\nLATEST NEWS: ' + JSON.stringify(news);
+      }
+    } catch(e) { console.warn('[VIVEK] Live data fetch failed:', e); }
+  }
+
   const agent = AGENTS[activeAgent];
-  const systemPrompt = agent.buildPrompt(learnedInstructions);
+  const systemPrompt = agent.buildPrompt(learnedInstructions) + liveContext;
   const txEl = document.getElementById('transcript-text');
   txEl.textContent = 'Neural bridge connecting…'; txEl.classList.add('active');
   setOrbMode('thinking');
@@ -1521,6 +1585,11 @@ async function startGeminiSession(initialText) {
         const normalized = normalizeSpeechText(userSaid);
         if (!normalized) return;
 
+        // Show user's speech immediately in transcript
+        const txEl = document.getElementById('transcript-text');
+        txEl.textContent = 'You: ' + userSaid;
+        txEl.classList.add('active');
+
         // ── COMMAND DETECTION (silent — never saved to DB, never sent to Gemini) ──
         const cmd = detectCommand(normalized);
 
@@ -1536,7 +1605,10 @@ async function startGeminiSession(initialText) {
         const textSwitchesPriya = /\b(priya|prya|preya|priyaa|call priya|switch to priya)\b/i.test(normalized);
         const textSwitchesVivek = /\b(vivek|vi vek|viveek|switch to vivek|call vivek)\b/i.test(normalized);
         
+        console.log('[VIVEK] User said:', userSaid, '| Normalized:', normalized, '| Switch Priya:', textSwitchesPriya, '| Switch Vivek:', textSwitchesVivek, '| Current agent:', activeAgent);
+        
         if (textSwitchesPriya && activeAgent !== 'priya') {
+          console.log('[VIVEK] Switching to PRIYA');
           stopCurrentResponseOnly();
           restartAfterClosePending = true;
           switchAgent('priya');
@@ -1551,6 +1623,7 @@ async function startGeminiSession(initialText) {
         }
 
         if (textSwitchesVivek && activeAgent !== 'vivek') {
+          console.log('[VIVEK] Switching to VIVEK');
           stopCurrentResponseOnly();
           restartAfterClosePending = true;
           switchAgent('vivek');
@@ -1564,8 +1637,37 @@ async function startGeminiSession(initialText) {
           return;
         }
 
+        // Check for live data request mid-conversation
+        if (isLiveDataRequest(userSaid)) {
+          let liveUpdate = '';
+          if (/\b(cricket|match|score|ipl|t20|world cup|odi|test)\b/i.test(userSaid)) {
+            const cricket = await fetchLiveCricket();
+            liveUpdate = 'LIVE CRICKET: ' + JSON.stringify(cricket);
+          }
+          if (/\b(news|headline|latest|breaking)\b/i.test(userSaid)) {
+            const news = await fetchLiveNews();
+            liveUpdate = 'LATEST NEWS: ' + JSON.stringify(news);
+          }
+          if (liveUpdate && liveWs && liveWs.readyState === WebSocket.OPEN) {
+            liveWs.send(JSON.stringify({ realtimeInput: { text: liveUpdate } }));
+          }
+        }
+
         // ── Normal utterance — save to DB ──
         saveUserSpeechText(userSaid);
+
+        // Graph request - open Desmos
+        if (isGraphRequest(userSaid)) {
+          let equation = '';
+          // Extract equation from user speech (simple patterns)
+          const eqMatch = userSaid.match(/y\s*=\s*([^,.\n]+)/i) ||
+                       userSaid.match(/(y\s*=\s*[^,.\n]+)/i) ||
+                       userSaid.match(/(x\^?[^,.\n]+)/i);
+          if (eqMatch) equation = eqMatch[1] || eqMatch[0];
+          
+          openDesmosGraph(equation);
+          showToast('GRAPH OPENED');
+        }
 
         // Color change (non-command, agent can respond)
         const colorWords = normalized.split(/\s+/);
@@ -1666,6 +1768,39 @@ function showToast(msg) {
   el.textContent = msg; el.classList.add('show');
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(function(){ el.classList.remove('show'); }, 2600);
+}
+
+/* ─────────────────────────────────────────────────────
+   DESMOS GRAPH CALCULATOR
+───────────────────────────────────────────────────── */
+function openDesmosGraph(equation) {
+  const modal = document.getElementById('desmos-modal');
+  const frame = document.getElementById('desmos-frame');
+  if (!modal || !frame) return;
+  
+  // Build Desmos URL with equation
+  let desmosUrl = 'https://www.desmos.com/calculator';
+  if (equation) {
+    // Encode equation for Desmos
+    const encoded = encodeURIComponent(equation.replace(/ /g, ''));
+    desmosUrl += '?q=' + encoded;
+  }
+  
+  frame.src = desmosUrl;
+  modal.classList.add('show');
+}
+
+function closeDesmosModal() {
+  const modal = document.getElementById('desmos-modal');
+  const frame = document.getElementById('desmos-frame');
+  if (modal) modal.classList.remove('show');
+  if (frame) frame.src = 'about:blank';
+}
+
+function isGraphRequest(text) {
+  const t = text.toLowerCase();
+  return /\b(graph|plot|draw|equation|function|y=|x\^|sin|cos|tan|linear|parabola|quadratic)\b/.test(t) ||
+         /\b(बनाओ|ग्राफ|plot karo|graph bana)\b/.test(t);
 }
 
 /* ─────────────────────────────────────────────────────
