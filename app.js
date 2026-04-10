@@ -10,7 +10,15 @@
 ═══════════════════════════════════════════════════════ */
 'use strict';
 
-const BACKEND_URL = 'https://vivek-qqwu.onrender.com';
+const BACKEND_URL = (() => {
+  if (window.VIVEK_BACKEND_URL) return window.VIVEK_BACKEND_URL;
+  if (window.location.protocol.startsWith('http')) {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return `${window.location.protocol}//${window.location.hostname}:3000`;
+    }
+  }
+  return 'https://vivek-qqwu.onrender.com';
+})();
 
 /* ─────────────────────────────────────────────────────
    STATE
