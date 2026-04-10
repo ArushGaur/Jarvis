@@ -1962,6 +1962,9 @@ function showToast(msg) {
 /* ─────────────────────────────────────────────────────
    DESMOS GRAPH CALCULATOR
 ───────────────────────────────────────────────────── */
+// Stores the pending Desmos URL set by voice command
+let pendingDesmosUrl = null;
+
 function openDesmosGraph(equation) {
   let expr = '';
   if (equation && equation.trim()) {
@@ -1981,49 +1984,54 @@ function openDesmosGraph(equation) {
     url = 'https://www.desmos.com/calculator#' + encoded;
   }
 
-  // Remove any existing overlay
-  const existing = document.getElementById('desmos-overlay');
+  // Try direct open first (works if called from a button click / gesture)
+  const w = window.open(url, '_blank');
+  if (w) {
+    showToast('GRAPH OPENED');
+    const txEl = document.getElementById('transcript-text');
+    if (txEl) { txEl.textContent = 'Graph opened — Sir'; txEl.classList.add('active'); }
+    console.log('[VIVEK] Desmos opened directly:', url);
+    return;
+  }
+
+  // Popup was blocked (called from async voice callback) — show banner with open link
+  pendingDesmosUrl = url;
+  showDesmosNotification(expr || 'graph', url);
+  console.log('[VIVEK] Desmos popup blocked, showing notification banner');
+}
+
+function showDesmosNotification(label, url) {
+  const existing = document.getElementById('desmos-notify');
   if (existing) existing.remove();
 
-  // Build full-screen overlay with iframe — works without popup permission
-  const overlay = document.createElement('div');
-  overlay.id = 'desmos-overlay';
-  overlay.style.cssText = `
-    position:fixed; top:0; left:0; width:100%; height:100%; z-index:9999;
-    background:rgba(0,0,0,0.92); display:flex; flex-direction:column;
+  const banner = document.createElement('div');
+  banner.id = 'desmos-notify';
+  banner.style.cssText = `
+    position:fixed; bottom:90px; left:50%; transform:translateX(-50%);
+    background:#0a0a1a; border:1px solid rgba(255,154,0,0.6);
+    color:#ff9a00; font-family:'Orbitron',monospace; font-size:12px;
+    letter-spacing:.1em; padding:12px 20px; z-index:9999;
+    display:flex; align-items:center; gap:14px; border-radius:4px;
+    box-shadow:0 0 24px rgba(255,154,0,0.3);
   `;
-
-  const header = document.createElement('div');
-  header.style.cssText = `
-    display:flex; align-items:center; justify-content:space-between;
-    padding:10px 18px; background:#0a0a1a;
-    border-bottom:1px solid rgba(255,154,0,0.3); flex-shrink:0;
+  banner.innerHTML = `
+    <span>⬡ GRAPH READY</span>
+    <a href="${url}" target="_blank"
+       style="color:#fff;background:rgba(255,154,0,0.2);border:1px solid rgba(255,154,0,0.5);
+              padding:5px 14px;text-decoration:none;cursor:pointer;letter-spacing:.08em;"
+       onclick="document.getElementById('desmos-notify').remove()">
+      OPEN →
+    </a>
+    <button onclick="document.getElementById('desmos-notify').remove()"
+      style="background:none;border:none;color:rgba(255,154,0,0.5);cursor:pointer;font-size:16px;">✕</button>
   `;
-  header.innerHTML = `
-    <span style="color:#ff9a00;font-family:'Orbitron',monospace;font-size:13px;letter-spacing:.15em;">
-      ⬡ GRAPH CALCULATOR${expr ? ' — ' + expr : ''}
-    </span>
-    <button onclick="document.getElementById('desmos-overlay').remove()"
-      style="background:none;border:1px solid rgba(255,154,0,0.4);color:#ff9a00;
-             font-size:12px;padding:5px 14px;cursor:pointer;letter-spacing:.1em;
-             font-family:'Orbitron',monospace;">
-      ✕ CLOSE
-    </button>
-  `;
+  document.body.appendChild(banner);
 
-  const frame = document.createElement('iframe');
-  frame.src = url;
-  frame.style.cssText = 'flex:1; width:100%; border:none;';
-  frame.allow = 'clipboard-read; clipboard-write';
+  // Auto-dismiss after 15 seconds
+  setTimeout(() => { if (banner.parentNode) banner.remove(); }, 15000);
 
-  overlay.appendChild(header);
-  overlay.appendChild(frame);
-  document.body.appendChild(overlay);
-
-  showToast('GRAPH OPENED');
   const txEl = document.getElementById('transcript-text');
-  if (txEl) { txEl.textContent = 'Graph opened — Sir'; txEl.classList.add('active'); }
-  console.log('[VIVEK] Desmos overlay opened:', url);
+  if (txEl) { txEl.textContent = 'Graph ready — tap OPEN in the banner — Sir'; txEl.classList.add('active'); }
 }
 
 function extractEquationFromSpeech(text) {
@@ -2085,25 +2093,34 @@ var bootLines = ['bl1','bl2','bl3','bl4','bl5'];
 var bootIdx = 0, bootPct = 0;
 
 // Tracks whether the user has given the first gesture (needed for AudioContext + mic)
-let gestureUnlocked = true;
+let gestureUnlocked = false;
 
 async function unlockAndStart() {
+  if (gestureUnlocked) return;
+  gestureUnlocked = true;
 
   // This runs inside a user gesture — safe to unlock AudioContext and request mic
   try {
     ensureAudioCtx();
-    // Pre-request mic permission now while we are in the gesture handler
-    // so startMicCapture() later never fails due to missing gesture
+    if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      // Store this pre-granted stream so startMicCapture can reuse it
-      micStream = stream;
-      // Immediately stop the tracks — startMicCapture will re-open with full settings
       stream.getTracks().forEach(t => t.stop());
       micStream = null;
     }
   } catch(e) {
     console.warn('[VIVEK] Mic pre-request failed:', e.message);
+  }
+
+  // Hide activate button and boot overlay
+  const activateBtn = document.getElementById('activate-btn');
+  if (activateBtn) activateBtn.style.display = 'none';
+  const overlay = document.getElementById('boot-overlay');
+  if (overlay) {
+    overlay.style.transition = 'opacity 0.6s';
+    overlay.style.opacity = '0';
+    overlay.style.pointerEvents = 'none';
+    setTimeout(() => { overlay.style.display = 'none'; }, 650);
   }
 
   const txEl = document.getElementById('transcript-text');
@@ -2148,12 +2165,17 @@ function runBoot() {
           return;
         }
 
-        // Auto-start: fade out boot overlay and begin immediately
-        overlay.style.transition = 'opacity 0.6s';
-        overlay.style.opacity = '0';
-        overlay.style.pointerEvents = 'none';
-        setTimeout(() => { overlay.style.display = 'none'; }, 650);
-        await unlockAndStart();
+        // Show ACTIVATE button — we MUST wait for a user gesture before
+        // creating AudioContext or requesting mic (browser autoplay policy)
+        const activateBtn = document.getElementById('activate-btn');
+        if (activateBtn) {
+          activateBtn.style.display = 'block';
+          activateBtn.onclick = () => unlockAndStart();
+        } else {
+          // Fallback: attach to overlay click
+          overlay.style.cursor = 'pointer';
+          overlay.onclick = () => unlockAndStart();
+        }
 
       }, 280);
     }
