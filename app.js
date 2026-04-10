@@ -1301,7 +1301,10 @@ function interruptAndStartNewTurn(userText) {
 ───────────────────────────────────────────────────── */
 async function fetchApiKey() {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/config`);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+    const res = await fetch(`${BACKEND_URL}/api/config`, { signal: controller.signal });
+    clearTimeout(timeout);
     const data = await res.json();
     if (data.apiKey) { apiKey = data.apiKey; return true; }
   } catch(err) { console.warn('[VIVEK] API key fetch failed:', err.message); }
@@ -2123,13 +2126,11 @@ function runBoot() {
         const overlay = document.getElementById('boot-overlay');
 
         if (!loaded) {
-          // Backend offline — show error inside overlay
-          const statusEl = overlay.querySelector('.boot-status') || overlay;
-          const errDiv = document.createElement('div');
-          errDiv.style.cssText = 'color:#ff4444;margin-top:20px;font-family:monospace;font-size:13px;';
-          errDiv.textContent = 'BACKEND OFFLINE — Check BACKEND_URL in app.js';
-          overlay.appendChild(errDiv);
-          return;
+          // Backend offline — show warning but still allow activation
+          const warnDiv = document.createElement('div');
+          warnDiv.style.cssText = 'color:#ff9a00;margin-top:12px;font-family:monospace;font-size:11px;letter-spacing:.1em;opacity:0.7;';
+          warnDiv.textContent = '⚠ BACKEND OFFLINE — LIMITED MODE';
+          overlay.appendChild(warnDiv);
         }
 
         // Show ACTIVATE button — we MUST wait for a user gesture before
