@@ -1,23 +1,25 @@
 /* ═══════════════════════════════════════════════════════
-   V.I.V.E.K — BACKEND SERVER v3.0
-   - Groq LLaMA 3.3 70b for AI responses
-   - DuckDuckGo + Wikipedia for live/real-time data (no key needed)
-   - Gemini TTS for neural voice output
-   - Turso DB for conversation history
+   V.I.V.E.K — BACKEND SERVER
+   Turso DB for conversation storage + API key proxy
+   Deploy on Render — set env vars in Render dashboard
 ═══════════════════════════════════════════════════════ */
 'use strict';
 
 require('dotenv').config();
-const express      = require('express');
-const cors         = require('cors');
-const https        = require('https');
-const http         = require('http');
+const express    = require('express');
+const cors       = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const { createClient } = require('@libsql/client');
+const { createServer } = require('http');
+const { WebSocketServer, WebSocket } = require('ws');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
+// ─────────────────────────────────────────────────────
+//  CORS — allow your frontend origin
+//  On Render, set FRONTEND_URL in environment variables
+// ─────────────────────────────────────────────────────
 app.use(cors({
   origin: process.env.FRONTEND_URL || '*',
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
@@ -25,9 +27,10 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '2mb' }));
 
-/* ─────────────────────────────────────────────────────
-   TURSO DATABASE
-───────────────────────────────────────────────────── */
+// ─────────────────────────────────────────────────────
+//  TURSO DATABASE CLIENT
+//  On Render, set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN
+// ─────────────────────────────────────────────────────
 let db;
 try {
   db = createClient({
@@ -39,278 +42,89 @@ try {
   console.error('[VIVEK] Turso client error:', err.message);
 }
 
+// ─────────────────────────────────────────────────────
+//  INIT DATABASE SCHEMA
+// ─────────────────────────────────────────────────────
 async function initDB() {
-  if (!db) return;
+  if (!db) { console.warn('[VIVEK] No DB client, skipping schema init'); return; }
   try {
-    await db.execute(`CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY, personality TEXT NOT NULL DEFAULT 'vivek',
-      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
-    await db.execute(`CREATE TABLE IF NOT EXISTS messages (
-      id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL,
-      content TEXT NOT NULL, timestamp INTEGER NOT NULL,
-      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE)`);
-    await db.execute(`CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp)`);
-    await db.execute(`CREATE TABLE IF NOT EXISTS boss_instructions (
-      id TEXT PRIMARY KEY, instruction TEXT NOT NULL, created_at INTEGER NOT NULL)`);
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        id          TEXT PRIMARY KEY,
+        personality TEXT NOT NULL DEFAULT 'vivek',
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL
+      )
+    `);
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id          TEXT PRIMARY KEY,
+        session_id  TEXT NOT NULL,
+        role        TEXT NOT NULL,
+        content     TEXT NOT NULL,
+        timestamp   INTEGER NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      )
+    `);
+    await db.execute(`
+      CREATE INDEX IF NOT EXISTS idx_messages_session 
+      ON messages(session_id, timestamp)
+    `);
+    // Instructions table — persistent boss instructions
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS boss_instructions (
+        id          TEXT PRIMARY KEY,
+        instruction TEXT NOT NULL,
+        created_at  INTEGER NOT NULL
+      )
+    `);
     console.log('[VIVEK] Database schema ready');
   } catch (err) {
     console.error('[VIVEK] Schema init error:', err.message);
   }
 }
 
-/* ─────────────────────────────────────────────────────
-   HEALTH
-───────────────────────────────────────────────────── */
+// ─────────────────────────────────────────────────────
+//  HEALTH CHECK
+// ─────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
-  res.json({ status: 'online', service: 'V.I.V.E.K Neural Core v3.0', timestamp: Date.now() });
+  res.json({ status: 'online', service: 'V.I.V.E.K Neural Core', timestamp: Date.now() });
 });
 
-/* ─────────────────────────────────────────────────────
-   GROQ CHAT ENDPOINT
-───────────────────────────────────────────────────── */
-app.post('/api/chat', async (req, res) => {
-  const { messages } = req.body;
-  if (!messages || !Array.isArray(messages)) {
-    return res.status(400).json({ error: 'messages array required' });
+// ─────────────────────────────────────────────────────
+//  GET GEMINI API KEY  (never exposed in frontend code)
+// ─────────────────────────────────────────────────────
+app.get('/api/config', (req, res) => {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) {
+    return res.status(503).json({ error: 'GEMINI_API_KEY not configured on server' });
   }
-
-  const groqKey = process.env.GROQ_API_KEY;
-  if (!groqKey) return res.status(503).json({ error: 'GROQ_API_KEY not configured' });
-
-  try {
-    const modelsToTry = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
-    let lastError = null;
-
-    for (const model of modelsToTry) {
-      try {
-        const body = JSON.stringify({
-          model,
-          messages: messages,
-          max_tokens: 500,
-          temperature: 0.75,
-          stream: false,
-        });
-
-        const groqRes = await fetchJSON('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${groqKey}`,
-            'Content-Type': 'application/json',
-          },
-          body,
-        });
-
-        const reply = groqRes.choices?.[0]?.message?.content || '';
-        if (reply) return res.json({ reply });
-        lastError = new Error(`Empty response from Groq model: ${model}`);
-      } catch (modelErr) {
-        lastError = modelErr;
-      }
-    }
-
-    throw lastError || new Error('All Groq models failed');
-
-  } catch (err) {
-    console.error('[VIVEK] Groq error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ apiKey: key });
 });
 
-/* ─────────────────────────────────────────────────────
-   LIVE SEARCH — DuckDuckGo Instant Answer + Wikipedia
-   No API key needed, reliable, not blocked on servers
-───────────────────────────────────────────────────── */
-app.get('/api/search', async (req, res) => {
-  const query = req.query.q;
-  if (!query) return res.status(400).json({ error: 'q parameter required' });
-  try {
-    const result = await liveSearch(query);
-    res.json({ result });
-  } catch (err) {
-    console.error('[VIVEK] Search error:', err.message);
-    res.json({ result: '' });
-  }
-});
+// ─────────────────────────────────────────────────────
+//  SESSION ROUTES
+// ─────────────────────────────────────────────────────
 
-async function liveSearch(query) {
-  const snippets = [];
-
-  // 1) DuckDuckGo Instant Answer API — free, no key, JSON
-  try {
-    const ddgUrl = 'https://api.duckduckgo.com/?q=' + encodeURIComponent(query) + '&format=json&no_html=1&skip_disambig=1';
-    const ddg = await fetchJSON(ddgUrl);
-    if (ddg.AbstractText && ddg.AbstractText.length > 20) snippets.push(ddg.AbstractText);
-    if (ddg.Answer && ddg.Answer.length > 5) snippets.push(ddg.Answer);
-    if (ddg.Definition && ddg.Definition.length > 10) snippets.push(ddg.Definition);
-    // Related topics — good for news/current events
-    for (const t of (ddg.RelatedTopics || []).slice(0, 4)) {
-      if (t.Text && t.Text.length > 20) snippets.push(t.Text);
-    }
-    if (ddg.Infobox && ddg.Infobox.content) {
-      for (const item of ddg.Infobox.content.slice(0, 4)) {
-        if (item.label && item.value) snippets.push(`${item.label}: ${item.value}`);
-      }
-    }
-  } catch(e) { console.warn('[VIVEK] DuckDuckGo failed:', e.message); }
-
-  // 2) Wikipedia Search API — good for factual / recent event questions
-  try {
-    const wikiSearch = await fetchJSON(
-      'https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=' +
-      encodeURIComponent(query) + '&utf8=1&format=json&srlimit=2'
-    );
-    const hits = wikiSearch?.query?.search || [];
-    for (const hit of hits.slice(0, 2)) {
-      // Get the extract for the top result
-      const extract = await fetchJSON(
-        'https://en.wikipedia.org/api/rest_v1/page/summary/' +
-        encodeURIComponent(hit.title.replace(/ /g, '_'))
-      );
-      if (extract?.extract && extract.extract.length > 30) {
-        snippets.push(extract.extract.slice(0, 400));
-        break; // one good Wikipedia extract is enough
-      }
-    }
-  } catch(e) { console.warn('[VIVEK] Wikipedia failed:', e.message); }
-
-  const combined = [...new Set(snippets)]
-    .filter(s => s && s.length > 10)
-    .slice(0, 6)
-    .join(' | ');
-
-  return combined.slice(0, 1200);
-}
-
-/* ─────────────────────────────────────────────────────
-   GEMINI TTS — Neural voice, same as original Vivek
-   Uses Gemini 2.5 Flash TTS REST endpoint
-   Returns raw PCM audio as base64 (24kHz, mono, int16)
-───────────────────────────────────────────────────── */
-app.post('/api/tts', async (req, res) => {
-  const { text, voice } = req.body;
-  if (!text) return res.status(400).json({ error: 'text required' });
-
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (!geminiKey) return res.status(503).json({ error: 'GEMINI_API_KEY not configured' });
-
-  const voiceName = voice || 'Puck'; // Puck = Vivek, Aoede = Priya
-
-  try {
-    const body = JSON.stringify({
-      contents: [{ parts: [{ text }] }],
-      generationConfig: {
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName } }
-        }
-      }
-    });
-
-    const ttsRes = await fetchJSON(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${geminiKey}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }
-    );
-
-    const audioData = ttsRes?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!audioData) {
-      console.error('[VIVEK] TTS: no audio in response', JSON.stringify(ttsRes).slice(0, 300));
-      return res.status(500).json({ error: 'No audio returned from Gemini TTS' });
-    }
-    res.json({ audio: audioData }); // base64 PCM 24kHz int16 mono
-  } catch(err) {
-    console.error('[VIVEK] TTS error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ─────────────────────────────────────────────────────
-   HTTP HELPERS
-───────────────────────────────────────────────────── */
-function fetchHTML(url, options = {}) {
-  return new Promise((resolve, reject) => {
-    const mod = url.startsWith('https') ? https : http;
-    const parsed = new URL(url);
-    const reqOptions = {
-      hostname: parsed.hostname,
-      path:     parsed.pathname + parsed.search,
-      method:   options.method || 'GET',
-      headers:  options.headers || {},
-    };
-
-    const req = mod.request(reqOptions, (res2) => {
-      // Handle redirect
-      if (res2.statusCode >= 300 && res2.statusCode < 400 && res2.headers.location) {
-        return fetchHTML(res2.headers.location, options).then(resolve).catch(reject);
-      }
-
-      let data = '';
-      const encoding = res2.headers['content-encoding'];
-
-      if (encoding === 'gzip' || encoding === 'br' || encoding === 'deflate') {
-        const zlib = require('zlib');
-        let stream;
-        if (encoding === 'gzip')    stream = zlib.createGunzip();
-        else if (encoding === 'br') stream = zlib.createBrotliDecompress();
-        else                        stream = zlib.createInflate();
-        res2.pipe(stream);
-        stream.on('data', chunk => { data += chunk.toString(); });
-        stream.on('end', () => resolve(data));
-        stream.on('error', reject);
-      } else {
-        res2.setEncoding('utf8');
-        res2.on('data', chunk => { data += chunk; });
-        res2.on('end', () => resolve(data));
-      }
-    });
-
-    req.on('error', reject);
-    req.setTimeout(8000, () => { req.destroy(); reject(new Error('Request timeout')); });
-    if (options.body) req.write(options.body);
-    req.end();
-  });
-}
-
-function fetchJSON(url, options = {}) {
-  return new Promise((resolve, reject) => {
-    const mod    = url.startsWith('https') ? https : http;
-    const parsed = new URL(url);
-    const reqOptions = {
-      hostname: parsed.hostname,
-      path:     parsed.pathname + parsed.search,
-      method:   options.method || 'GET',
-      headers:  options.headers || {},
-    };
-
-    const req = mod.request(reqOptions, (res2) => {
-      let data = '';
-      res2.setEncoding('utf8');
-      res2.on('data', chunk => { data += chunk; });
-      res2.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch(e) { reject(new Error('JSON parse error: ' + data.slice(0, 200))); }
-      });
-    });
-
-    req.on('error', reject);
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Groq request timeout')); });
-    if (options.body) req.write(options.body);
-    req.end();
-  });
-}
-
-/* ─────────────────────────────────────────────────────
-   SESSION ROUTES
-───────────────────────────────────────────────────── */
+// Create new session
 app.post('/api/sessions', async (req, res) => {
   if (!db) return res.status(503).json({ error: 'Database unavailable' });
   try {
-    const id  = uuidv4(), now = Date.now();
+    const id  = uuidv4();
+    const now = Date.now();
     const personality = req.body.personality || 'vivek';
-    await db.execute({ sql: 'INSERT INTO sessions (id, personality, created_at, updated_at) VALUES (?,?,?,?)', args: [id, personality, now, now] });
+    await db.execute({
+      sql: 'INSERT INTO sessions (id, personality, created_at, updated_at) VALUES (?,?,?,?)',
+      args: [id, personality, now, now],
+    });
     res.json({ sessionId: id, personality, created_at: now });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error('[VIVEK] Create session error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
+// List all sessions (most recent first)
 app.get('/api/sessions', async (req, res) => {
   if (!db) return res.status(503).json({ error: 'Database unavailable' });
   try {
@@ -318,63 +132,142 @@ app.get('/api/sessions', async (req, res) => {
     const result = await db.execute({
       sql: `SELECT s.id, s.personality, s.created_at, s.updated_at,
                    COUNT(m.id) as message_count,
-                   (SELECT content FROM messages WHERE session_id = s.id AND role = 'user' ORDER BY timestamp DESC LIMIT 1) as last_user_msg
-            FROM sessions s LEFT JOIN messages m ON m.session_id = s.id
-            GROUP BY s.id ORDER BY s.updated_at DESC LIMIT ?`,
+                   (SELECT content FROM messages
+                    WHERE session_id = s.id AND role = 'user'
+                    ORDER BY timestamp DESC LIMIT 1) as last_user_msg
+            FROM sessions s
+            LEFT JOIN messages m ON m.session_id = s.id
+            GROUP BY s.id
+            ORDER BY s.updated_at DESC
+            LIMIT ?`,
       args: [limit],
     });
     res.json({ sessions: result.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error('[VIVEK] List sessions error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
+// Get single session with messages
 app.get('/api/sessions/:id', async (req, res) => {
   if (!db) return res.status(503).json({ error: 'Database unavailable' });
   try {
-    const s = await db.execute({ sql: 'SELECT * FROM sessions WHERE id = ?', args: [req.params.id] });
-    if (s.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
-    const m = await db.execute({ sql: 'SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC', args: [req.params.id] });
-    res.json({ session: s.rows[0], messages: m.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const sessResult = await db.execute({
+      sql: 'SELECT * FROM sessions WHERE id = ?',
+      args: [req.params.id],
+    });
+    if (sessResult.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+
+    const msgResult = await db.execute({
+      sql: 'SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC',
+      args: [req.params.id],
+    });
+    res.json({ session: sessResult.rows[0], messages: msgResult.rows });
+  } catch (err) {
+    console.error('[VIVEK] Get session error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
+// Delete session
 app.delete('/api/sessions/:id', async (req, res) => {
   if (!db) return res.status(503).json({ error: 'Database unavailable' });
   try {
     await db.execute({ sql: 'DELETE FROM sessions WHERE id = ?', args: [req.params.id] });
     res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-/* ─────────────────────────────────────────────────────
-   MESSAGE ROUTES
-───────────────────────────────────────────────────── */
+// ─────────────────────────────────────────────────────
+//  MESSAGE ROUTES
+// ─────────────────────────────────────────────────────
+
+// Save a message to a session
 app.post('/api/sessions/:sessionId/messages', async (req, res) => {
   if (!db) return res.status(503).json({ error: 'Database unavailable' });
   try {
     const { role, content } = req.body;
     if (!role || !content) return res.status(400).json({ error: 'role and content required' });
-    if (!['user','assistant'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    if (!['user','assistant'].includes(role)) return res.status(400).json({ error: 'role must be user or assistant' });
+
     const sessionId = req.params.sessionId;
-    const check = await db.execute({ sql: 'SELECT id FROM sessions WHERE id = ?', args: [sessionId] });
-    if (check.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+
+    // Verify session exists before inserting — avoids silent FK failures
+    const sessionCheck = await db.execute({
+      sql: 'SELECT id FROM sessions WHERE id = ?',
+      args: [sessionId],
+    });
+    if (sessionCheck.rows.length === 0) {
+      console.warn('[VIVEK] Save message: session not found:', sessionId);
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const id  = uuidv4();
     const now = Date.now();
-    await db.execute({ sql: 'INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (?,?,?,?,?)', args: [uuidv4(), sessionId, role, content, now] });
-    await db.execute({ sql: 'UPDATE sessions SET updated_at = ? WHERE id = ?', args: [now, sessionId] });
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+
+    await db.execute({
+      sql: 'INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (?,?,?,?,?)',
+      args: [id, sessionId, role, content, now],
+    });
+    await db.execute({
+      sql: 'UPDATE sessions SET updated_at = ? WHERE id = ?',
+      args: [now, sessionId],
+    });
+    res.json({ messageId: id, sessionId, role, content, timestamp: now });
+  } catch (err) {
+    console.error('[VIVEK] Save message error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
+// Save full conversation batch (end-of-session bulk save)
+app.post('/api/sessions/:sessionId/messages/batch', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Database unavailable' });
+  try {
+    const { messages } = req.body;
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'messages array required' });
+    }
+    const sessionId = req.params.sessionId;
+    const now = Date.now();
+    const statements = messages.map((m, i) => ({
+      sql: 'INSERT OR IGNORE INTO messages (id, session_id, role, content, timestamp) VALUES (?,?,?,?,?)',
+      args: [uuidv4(), sessionId, m.role, m.content, now + i],
+    }));
+    statements.push({
+      sql: 'UPDATE sessions SET updated_at = ? WHERE id = ?',
+      args: [now, sessionId],
+    });
+    await db.batch(statements);
+    res.json({ success: true, saved: messages.length });
+  } catch (err) {
+    console.error('[VIVEK] Batch save error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get all messages for a session
 app.get('/api/sessions/:sessionId/messages', async (req, res) => {
   if (!db) return res.status(503).json({ error: 'Database unavailable' });
   try {
-    const result = await db.execute({ sql: 'SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC', args: [req.params.sessionId] });
+    const result = await db.execute({
+      sql: 'SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC',
+      args: [req.params.sessionId],
+    });
     res.json({ messages: result.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-/* ─────────────────────────────────────────────────────
-   INSTRUCTIONS ROUTES
-───────────────────────────────────────────────────── */
+// ─────────────────────────────────────────────────────
+//  BOSS INSTRUCTIONS — Persistent learning
+// ─────────────────────────────────────────────────────
+
+// Get all instructions
 app.get('/api/instructions', async (req, res) => {
   if (!db) return res.json({ instructions: [] });
   try {
@@ -383,35 +276,169 @@ app.get('/api/instructions', async (req, res) => {
   } catch(err) { res.json({ instructions: [] }); }
 });
 
+// Save instructions (replaces all)
 app.post('/api/instructions', async (req, res) => {
   if (!db) return res.status(503).json({ error: 'Database unavailable' });
   try {
     const { instructions } = req.body;
     if (!Array.isArray(instructions)) return res.status(400).json({ error: 'instructions array required' });
+    // Clear old, insert new
     await db.execute('DELETE FROM boss_instructions');
     const now = Date.now();
     for (let i = 0; i < instructions.length; i++) {
-      await db.execute({ sql: 'INSERT INTO boss_instructions (id, instruction, created_at) VALUES (?,?,?)', args: [uuidv4(), instructions[i], now + i] });
+      await db.execute({
+        sql: 'INSERT INTO boss_instructions (id, instruction, created_at) VALUES (?,?,?)',
+        args: [uuidv4(), instructions[i], now + i]
+      });
     }
     res.json({ success: true, saved: instructions.length });
+  } catch(err) {
+    console.error('[VIVEK] Instructions save error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Add single instruction
+app.post('/api/instructions/add', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Database unavailable' });
+  try {
+    const { instruction } = req.body;
+    if (!instruction) return res.status(400).json({ error: 'instruction required' });
+    await db.execute({
+      sql: 'INSERT INTO boss_instructions (id, instruction, created_at) VALUES (?,?,?)',
+      args: [uuidv4(), instruction, Date.now()]
+    });
+    res.json({ success: true });
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
-/* ─────────────────────────────────────────────────────
-   START SERVER
-───────────────────────────────────────────────────── */
-initDB().then(() => {
-  const httpServer = require('http').createServer(app);
-  httpServer.listen(PORT, () => {
-    console.log(`[VIVEK] Neural Core v3.0 running on port ${PORT}`);
-    console.log(`[VIVEK] Groq Key:  ${process.env.GROQ_API_KEY ? 'SET ✓' : 'MISSING ✗'}`);
-    console.log(`[VIVEK] Turso DB:  ${process.env.TURSO_DATABASE_URL ? 'CONNECTED' : 'NOT CONFIGURED'}`);
+// ─────────────────────────────────────────────────────
+//  STATS ROUTE
+// ─────────────────────────────────────────────────────
+app.get('/api/stats', async (req, res) => {
+  if (!db) return res.status(503).json({ error: 'Database unavailable' });
+  try {
+    const [sessCount, msgCount] = await Promise.all([
+      db.execute('SELECT COUNT(*) as count FROM sessions'),
+      db.execute('SELECT COUNT(*) as count FROM messages'),
+    ]);
+    res.json({
+      total_sessions:  sessCount.rows[0].count,
+      total_messages:  msgCount.rows[0].count,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-    // Keep-alive ping for Render free tier
+// ─────────────────────────────────────────────────────
+//  WEBSOCKET PROXY — forwards browser <-> Gemini Live
+// ─────────────────────────────────────────────────────
+const httpServer = createServer(app);
+const wss = new WebSocketServer({ server: httpServer, path: '/gemini-proxy' });
+
+wss.on('connection', function(clientWs) {
+  console.log('[VIVEK] WebSocket client connected');
+  // gemini-3.1-flash-live-preview requires v1beta endpoint
+  const geminiUrl = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=' + process.env.GEMINI_API_KEY;
+  const geminiWs = new WebSocket(geminiUrl); // ← this line was missing!
+
+  const messageQueue = [];
+  const MAX_QUEUE = 200; // cap at ~8 seconds of audio to prevent memory exhaustion
+  let geminiReady = false;
+
+  clientWs.on('message', (msg) => {
+    if (geminiReady && geminiWs.readyState === WebSocket.OPEN) {
+      geminiWs.send(msg);
+    } else {
+      if (messageQueue.length < MAX_QUEUE) {
+        messageQueue.push(msg);
+      } else {
+        // Queue full — drop oldest chunk (ring-buffer behaviour)
+        messageQueue.shift();
+        messageQueue.push(msg);
+      }
+    }
+  });
+
+  geminiWs.on('open', () => {
+    console.log('[VIVEK] Gemini WebSocket connected');
+    geminiReady = true;
+    while (messageQueue.length > 0) {
+      geminiWs.send(messageQueue.shift());
+    }
+  });
+
+  geminiWs.on('message', (msg) => {
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.send(msg);
+  });
+
+  geminiWs.on('close', (code, reason) => {
+    const reasonStr = reason ? reason.toString() : 'no reason';
+    console.log(`[VIVEK] Gemini WebSocket closed — code: ${code}, reason: ${reasonStr}`);
+    const isAuthError = (code === 1008 || code === 4001 || code === 4003);
+    const isAbnormal  = (code !== 1000 && code !== 1001);
+    if (isAuthError) {
+      console.error('[VIVEK] ❌ Gemini auth/permission error — check GEMINI_API_KEY and that Gemini Live API is enabled for your project.');
+    }
+    if (clientWs.readyState === WebSocket.OPEN) {
+      // Only propagate error to frontend on actual error closes, NOT normal session ends.
+      // Normal close (1000/1001) means the turn finished — frontend handles reconnect itself.
+      if (isAuthError) {
+        try {
+          clientWs.send(JSON.stringify({ error: { message: `Gemini auth error (code ${code}): ${reasonStr}. Check GEMINI_API_KEY.` } }));
+        } catch(e) {}
+      } else if (isAbnormal) {
+        try {
+          clientWs.send(JSON.stringify({ error: { message: `Gemini connection dropped (code ${code}): ${reasonStr}` } }));
+        } catch(e) {}
+      }
+      // Always close the client WS so frontend reconnects
+      clientWs.close();
+    }
+  });
+
+  geminiWs.on('error', (err) => {
+    console.error('[VIVEK] Gemini WebSocket error:', err.message);
+    if (clientWs.readyState === WebSocket.OPEN) {
+      try {
+        clientWs.send(JSON.stringify({ error: { message: 'Gemini connection error: ' + err.message } }));
+      } catch(e) {}
+      clientWs.close();
+    }
+  });
+
+  clientWs.on('close', () => {
+    if (geminiWs.readyState === WebSocket.OPEN) geminiWs.close();
+  });
+
+  clientWs.on('error', (err) => {
+    console.error('[VIVEK] Client WebSocket error:', err.message);
+    if (geminiWs.readyState === WebSocket.OPEN) geminiWs.close();
+  });
+});
+
+// ─────────────────────────────────────────────────────
+//  START SERVER
+// ─────────────────────────────────────────────────────
+initDB().then(() => {
+  httpServer.listen(PORT, () => {
+    console.log(`[VIVEK] Neural Core backend running on port ${PORT}`);
+    console.log(`[VIVEK] Turso DB: ${process.env.TURSO_DATABASE_URL ? 'CONNECTED' : 'NOT CONFIGURED'}`);
+    console.log(`[VIVEK] Gemini Key: ${process.env.GEMINI_API_KEY ? 'SET ✓' : 'MISSING ✗'}`);
+
+    // ── Keep-alive self-ping for Render free tier (sleeps after 15min inactivity)
+    // Pings every 10 minutes so the server stays warm
     const SELF_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
     setInterval(() => {
+      const http = require('http');
+      const https = require('https');
       const mod = SELF_URL.startsWith('https') ? https : http;
-      mod.get(`${SELF_URL}/health`, () => {}).on('error', () => {});
-    }, 10 * 60 * 1000);
+      mod.get(`${SELF_URL}/health`, (res) => {
+        console.log(`[VIVEK] Self-ping OK — status ${res.statusCode}`);
+      }).on('error', (err) => {
+        console.warn('[VIVEK] Self-ping failed:', err.message);
+      });
+    }, 10 * 60 * 1000); // every 10 minutes
   });
 });
