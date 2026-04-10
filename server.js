@@ -385,6 +385,178 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
+
+
+// ─────────────────────────────────────────────────────
+//  DESMOS GRAPH PAGE — served from our own domain
+//  so it loads in iframe without X-Frame-Options block
+// ─────────────────────────────────────────────────────
+app.get('/graph', (req, res) => {
+  const eq = req.query.eq || '';
+  const safeEq = eq.replace(/[<>"'&]/g, ''); // basic sanitize
+  res.setHeader('Content-Type', 'text/html');
+  res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VIVEK Graph</title>
+  <script src="https://www.desmos.com/api/v1.9/calculator.js?apiKey=003d4029b0d741db8dfa66ddd9bc6983"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #1a1a2e; }
+    #calculator { width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <div id="calculator"></div>
+  <script>
+    var elt = document.getElementById('calculator');
+    var calculator = Desmos.GraphingCalculator(elt, {
+      keypad: true,
+      expressions: true,
+      settingsMenu: true,
+      zoomButtons: true,
+      border: false,
+    });
+    var eq = decodeURIComponent("${safeEq}");
+    if (eq) {
+      if (!/^[a-zA-Z]\s*=/.test(eq)) eq = 'y=' + eq;
+      calculator.setExpression({ id: 'g1', latex: eq });
+    }
+  </script>
+</body>
+</html>`);
+});
+
+// ─────────────────────────────────────────────────────
+//  SPOTIFY OAUTH + PLAYBACK ROUTES
+//  Set in Render env: SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
+//  Redirect URI registered in Spotify Dashboard:
+//  https://vivek-qqwu.onrender.com/callback
+// ─────────────────────────────────────────────────────
+
+const SPOTIFY_CLIENT_ID     = process.env.SPOTIFY_CLIENT_ID;
+const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
+const SPOTIFY_REDIRECT_URI  = 'https://vivek-qqwu.onrender.com/callback';
+const SPOTIFY_SCOPES        = 'streaming user-read-email user-read-private user-modify-playback-state user-read-playback-state';
+
+let spotifyTokens = { access_token: null, refresh_token: null, expires_at: 0 };
+
+// Step 1 — redirect to Spotify login
+app.get('/auth/spotify', (req, res) => {
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id:     SPOTIFY_CLIENT_ID,
+    scope:         SPOTIFY_SCOPES,
+    redirect_uri:  SPOTIFY_REDIRECT_URI,
+  });
+  res.redirect('https://accounts.spotify.com/authorize?' + params.toString());
+});
+
+// Step 2 — Spotify sends code here, exchange for tokens
+app.get('/callback', async (req, res) => {
+  const code = req.query.code;
+  if (!code) return res.status(400).send('No code received from Spotify.');
+  try {
+    const creds = Buffer.from(SPOTIFY_CLIENT_ID + ':' + SPOTIFY_CLIENT_SECRET).toString('base64');
+    const response = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + creds,
+        'Content-Type':  'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type:   'authorization_code',
+        code,
+        redirect_uri: SPOTIFY_REDIRECT_URI,
+      }),
+    });
+    const data = await response.json();
+    if (data.error) return res.status(400).send('Spotify error: ' + data.error_description);
+    spotifyTokens.access_token  = data.access_token;
+    spotifyTokens.refresh_token = data.refresh_token;
+    spotifyTokens.expires_at    = Date.now() + (data.expires_in - 60) * 1000;
+    console.log('[VIVEK] Spotify auth successful');
+    res.send('<html><body style="background:#000;color:#ff9a00;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;"><h2>✅ Spotify Connected! You can close this tab and return to VIVEK.</h2></body></html>');
+  } catch(err) {
+    console.error('[VIVEK] Spotify callback error:', err);
+    res.status(500).send('Token exchange failed: ' + err.message);
+  }
+});
+
+// Auto-refresh access token using refresh token
+async function refreshSpotifyToken() {
+  if (!spotifyTokens.refresh_token) return false;
+  try {
+    const creds = Buffer.from(SPOTIFY_CLIENT_ID + ':' + SPOTIFY_CLIENT_SECRET).toString('base64');
+    const response = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + creds,
+        'Content-Type':  'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type:    'refresh_token',
+        refresh_token: spotifyTokens.refresh_token,
+      }),
+    });
+    const data = await response.json();
+    if (data.access_token) {
+      spotifyTokens.access_token = data.access_token;
+      spotifyTokens.expires_at   = Date.now() + (data.expires_in - 60) * 1000;
+      console.log('[VIVEK] Spotify token refreshed');
+      return true;
+    }
+    return false;
+  } catch(err) {
+    console.error('[VIVEK] Spotify refresh error:', err);
+    return false;
+  }
+}
+
+// Ensure token is valid before use
+async function ensureSpotifyToken() {
+  if (!spotifyTokens.access_token) return false;
+  if (Date.now() >= spotifyTokens.expires_at) {
+    return await refreshSpotifyToken();
+  }
+  return true;
+}
+
+// Step 3 — frontend gets access token for Web Playback SDK
+app.get('/api/spotify/token', async (req, res) => {
+  const ok = await ensureSpotifyToken();
+  if (!ok) return res.status(401).json({ error: 'Spotify not authenticated. Visit /auth/spotify first.' });
+  res.json({ access_token: spotifyTokens.access_token });
+});
+
+// Step 4 — search for a track and return its URI
+app.get('/api/spotify/search', async (req, res) => {
+  const query = req.query.q;
+  if (!query) return res.status(400).json({ error: 'q param required' });
+  const ok = await ensureSpotifyToken();
+  if (!ok) return res.status(401).json({ error: 'Spotify not authenticated' });
+  try {
+    const url = 'https://api.spotify.com/v1/search?' + new URLSearchParams({ q: query, type: 'track', limit: 1, market: 'IN' });
+    const response = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + spotifyTokens.access_token }
+    });
+    const data = await response.json();
+    const track = data.tracks && data.tracks.items && data.tracks.items[0];
+    if (!track) return res.status(404).json({ error: 'Track not found' });
+    res.json({
+      uri:     track.uri,
+      name:    track.name,
+      artist:  track.artists.map(a => a.name).join(', '),
+      album:   track.album.name,
+      image:   track.album.images[0] ? track.album.images[0].url : null,
+    });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─────────────────────────────────────────────────────
 //  WEBSOCKET PROXY — forwards browser <-> Gemini Live
 // ─────────────────────────────────────────────────────
