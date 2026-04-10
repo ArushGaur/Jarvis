@@ -313,6 +313,60 @@ app.post('/api/instructions/add', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────
+//  LIVE DATA ROUTES (Cricket & News)
+// ─────────────────────────────────────────────────────
+
+// Cache for live data
+let liveDataCache = { cricket: null, news: null, lastFetch: 0 };
+const CACHE_TTL = 30000; // 30 seconds
+
+// Cricbuzz API (no API key needed)
+app.get('/api/live/cricket', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (liveDataCache.cricket && now - liveDataCache.lastFetch < CACHE_TTL) {
+      return res.json(liveDataCache.cricket);
+    }
+    // Using Cricbuzz API for live matches
+    const response = await fetch('https://api.cricbuzz.com/api/json/v3/match/全部', {
+      headers: { 'Accept': 'application/json' }
+    });
+    const data = await response.json();
+    liveDataCache.cricket = data;
+    liveDataCache.lastFetch = now;
+    res.json(data);
+  } catch(err) {
+    res.json({ matches: [], error: err.message });
+  }
+});
+
+// News API (using GNews.io - get free key at https://gnews.io)
+const GNEWS_KEY = process.env.GNEWS_API_KEY || '';
+app.get('/api/live/news', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (liveDataCache.news && now - liveDataCache.lastFetch < CACHE_TTL) {
+      return res.json(liveDataCache.news);
+    }
+    if (!GNEWS_KEY) {
+      // Fallback: use a public RSS-to-JSON proxy
+      const response = await fetch('https://api.rss2json.com/v1/api.json?rss=https://timesofindia.indiatimes.com/rssfeedstop.cms');
+      const data = await response.json();
+      liveDataCache.news = data;
+      liveDataCache.lastFetch = now;
+      return res.json(data);
+    }
+    const response = await fetch(`https://gnews.io/api/v4/top-headlines?country=in&lang=en&max=10&apikey=${GNEWS_KEY}`);
+    const data = await response.json();
+    liveDataCache.news = data;
+    liveDataCache.lastFetch = now;
+    res.json(data);
+  } catch(err) {
+    res.json({ articles: [], error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────
 //  STATS ROUTE
 // ─────────────────────────────────────────────────────
 app.get('/api/stats', async (req, res) => {
