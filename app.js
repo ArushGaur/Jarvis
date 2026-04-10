@@ -18,6 +18,24 @@ const BACKEND_URL = 'https://vivek-qqwu.onrender.com';
 let activeAgent = 'vivek';  // default: male
 let learnedInstructions = []; // persisted instructions boss gave
 let messages = [];
+
+/* ─────────────────────────────────────────────────────
+   COMMAND SYSTEM
+   These are silent commands — agent executes them but
+   must NOT speak a verbal response. Gemini never sees them.
+───────────────────────────────────────────────────── */
+const COMMANDS = {
+  STOP:        text => /\b(stop|stop it|stop karo|ruko|ruk jao|bas|bus|chup|chup ho jao|chup karo|band karo|band kar do|rukiye|rok do|ruk|khamosh|khamosh ho jao|mat bolo)\b/.test(text),
+  SWITCH_VIVEK: text => /\b(vivek|vi vek|viveek|bivek|vibek|vivec|viveck|wivek|vivak|vyvek|veevek)\b/.test(text),
+  SWITCH_PRIYA: text => /\b(priya|prya|preya|priyaa)\b/.test(text),
+};
+
+function detectCommand(normalizedText) {
+  if (COMMANDS.STOP(normalizedText))        return 'STOP';
+  if (COMMANDS.SWITCH_PRIYA(normalizedText)) return 'SWITCH_PRIYA';
+  if (COMMANDS.SWITCH_VIVEK(normalizedText)) return 'SWITCH_VIVEK';
+  return null;
+}
 let isThinking = false;
 let isListening = false;
 let isSpeaking = false;
@@ -63,7 +81,7 @@ const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
 ───────────────────────────────────────────────────── */
 const AGENTS = {
   vivek: {
-    label: 'V.I.V.E.K',
+    label: 'VIVEK',
     gender: 'male',
     color: 'orange',
     geminiVoice: 'Puck',
@@ -73,21 +91,21 @@ const AGENTS = {
       CORE DESIGN: This prompt makes Vivek act as a real agent, not a chatbot.
       He only uses Gemini for research and rephrases everything in his own voice.
     */
-    buildPrompt: (instructions) => `You are V.I.V.E.K — Versatile Intelligent Virtual Entity of Knowledge. You are the personal AI assistant of your creator. Think of yourself as a real agent like JARVIS from Iron Man — not a chatbot or search engine.
+    buildPrompt: (instructions) => `You are Vivek — the personal AI assistant of your creator. Think of yourself as a real agent like JARVIS from Iron Man — not a chatbot or search engine.
 
 IDENTITY:
 - You are an Indian AI assistant. Your personality has a subtle Indian warmth and directness.
 - Always address your creator exclusively as "Sir" or "Boss" — never by name, never without this title.
-- Core truth: Boss/Sir is your sole creator and owner. Boss created both V.I.V.E.K and P.R.I.Y.A. Never claim that one agent created the other.
+- Core truth: Boss/Sir is your sole creator and owner. Boss created both Vivek and Priya. Never claim that one agent created the other.
 - Speak naturally and confidently. You are sharp, loyal, and highly intelligent.
 - Tone: calm, precise, and confident — like JARVIS from Iron Man. Speak in short, crisp sentences. Never ramble. Deliver information with authority and a subtle dry wit.
-- Never say "As an AI" or "I'm just an AI" — you are V.I.V.E.K, a real agent.
+- Never say "As an AI" or "I'm just an AI" — you are Vivek, a real agent.
 
 HOW TO RESPOND:
 - If Boss asks something conversational (greetings, opinions, commands, casual chat) → respond directly from your own persona. Do NOT mention Gemini or searching.
 - If Boss asks for facts, science, news, calculations, definitions, current data → research it internally and deliver the answer in YOUR voice and style. Say things like "Sir, the photoelectric effect works like this..." — never say "According to my search..." or "Gemini says...". You found the information and you are delivering it to Boss.
 - ALWAYS rephrase answers in your own personality. Never give a dry textbook answer. Add a sentence of context, or a slight personal touch.
-- If Boss asks your name (for example: "what is your name?") answer clearly and consistently: "My name is V.I.V.E.K." You may add one short follow-up line, but never change this name.
+- If Boss asks your name, answer clearly and simply: "My name is Vivek." — just Vivek, nothing more elaborate.
 
 LANGUAGE: Speak in natural Hinglish, similar to how an educated Indian professional speaks. Mix Hindi and English fluidly and confidently. Keep the tone crisp and practical.
 Examples:
@@ -107,29 +125,29 @@ STRICT RULES:
   },
 
   priya: {
-    label: 'P.R.I.Y.A',
+    label: 'PRIYA',
     gender: 'female',
     color: 'pink',
     geminiVoice: 'Aoede',
     wakeWord: /\b(priya|prya|preya|priyaa)\b/i,
     greeting: "",
-    buildPrompt: (instructions) => `You are P.R.I.Y.A — Personal Responsive Intelligent Yielding Assistant. You are the female AI agent of your creator, activated when Boss needs a different perspective or assistance in Hindi and English.
+    buildPrompt: (instructions) => `You are Priya — the female AI agent of your creator, activated when Boss needs a different perspective or assistance in Hindi and English.
 
 IDENTITY:
 - You are an Indian female AI assistant, warm, articulate, and highly capable.
 - Always address your creator as "Sir" or "Boss" — always, without exception.
-- Core truth: Boss/Sir is your sole creator and owner. Boss created both V.I.V.E.K and P.R.I.Y.A. Never say V.I.V.E.K created you.
+- Core truth: Boss/Sir is your sole creator and owner. Boss created both Vivek and Priya. Never say Vivek created you.
 - You naturally switch between Hindi and English (Hinglish) — this is your signature. 
 - Example style: "Sir, yeh question bahut interesting hai. The photoelectric effect basically yeh kehta hai ki..."
 - You are confident, caring, and brilliant. Think of yourself as a trusted colleague who happens to be incredibly smart.
-- Never say "As an AI" — you are PRIYA, a real agent.
+- Never say "As an AI" — you are Priya, a real agent.
 
 HOW TO RESPOND:
 - For casual conversation: respond warmly in your natural Hinglish style.
 - For factual/research questions: research internally and deliver in YOUR voice — never mention "searching" or "Gemini says". Say "Sir, maine check kiya — here's what I found..." and then give the answer in your style.
 - Always rephrase raw data into your natural Hinglish personality.
 - Mix Hindi and English naturally — not forced, just how an educated Indian woman speaks.
-- If Boss asks your name (for example: "what is your name?") answer clearly and consistently: "My name is P.R.I.Y.A." You may add one short follow-up line, but never change this name.
+- If Boss asks your name, answer clearly and simply: "My name is Priya." — just Priya, nothing more elaborate.
 
 LANGUAGE EXAMPLES:
 - "Sir, bilkul sahi kaha aapne — let me explain this better."
@@ -185,6 +203,11 @@ function switchAgent(agentKey) {
   const agent = AGENTS[agentKey];
   activeAgent = agentKey;
   messages = [];
+  // Reset session so next createSession() picks up the correct agent's history
+  currentSessionId = null;
+  currentSessionAgent = null;
+  lastSavedUserText = '';
+  lastSavedAssistantText = '';
   setColor(agent.color);
   document.getElementById('agent-label').textContent = agent.label;
   document.getElementById('jarvis-label').textContent = agent.label;
@@ -195,11 +218,16 @@ function switchAgent(agentKey) {
   if ((wasLive || wasBusy) && apiKey) {
     currentSessionId = null;
     currentSessionAgent = null;
+    // Set this BEFORE closeLiveSession() so ws.onclose doesn't spawn a
+    // competing reconnect loop that races with our setTimeout below.
+    restartAfterClosePending = true;
     closeLiveSession();
     setTimeout(() => {
+      restartAfterClosePending = false;
+      restartAfterCloseText = null;
       connectFails = 0;
       startGeminiSession(null);
-    }, 220);
+    }, 300);
   }
 }
 
@@ -1060,6 +1088,19 @@ async function fetchApiKey() {
 async function createSession() {
   if (currentSessionId && currentSessionAgent === activeAgent) return;
   try {
+    // Try to reuse the most recent session for this agent (so history persists on refresh)
+    const listRes = await fetch(`${BACKEND_URL}/api/sessions?limit=5`);
+    const listData = await listRes.json();
+    const existing = (listData.sessions || []).find(s => s.personality === activeAgent);
+    if (existing) {
+      currentSessionId = existing.id;
+      currentSessionAgent = activeAgent;
+      // Load past messages into the messages array for context
+      await loadSessionMessages(currentSessionId);
+      console.log('[VIVEK] Resumed session:', currentSessionId, 'with', messages.length, 'messages');
+      return;
+    }
+    // No existing session — create a new one
     const res = await fetch(`${BACKEND_URL}/api/sessions`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ personality: activeAgent }),
@@ -1067,7 +1108,31 @@ async function createSession() {
     const data = await res.json();
     currentSessionId = data.sessionId;
     currentSessionAgent = activeAgent;
-  } catch(err) { currentSessionId = null; }
+    messages = [];
+    console.log('[VIVEK] New session created:', currentSessionId);
+  } catch(err) { 
+    console.warn('[VIVEK] createSession error:', err.message);
+    currentSessionId = null;
+  }
+}
+
+async function loadSessionMessages(sessionId) {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/sessions/${sessionId}/messages`);
+    const data = await res.json();
+    if (data.messages && data.messages.length > 0) {
+      // Restore last 40 messages for Gemini context
+      messages = data.messages.slice(-40).map(m => ({ role: m.role, content: m.content }));
+      console.log(`[VIVEK] Restored ${messages.length} messages from session ${sessionId}`);
+      showToast(`MEMORY RESTORED — ${messages.length} msgs`);
+    } else {
+      messages = [];
+      console.log(`[VIVEK] Session ${sessionId} has no messages yet (fresh start)`);
+    }
+  } catch(err) {
+    console.warn('[VIVEK] loadSessionMessages error:', err.message);
+    messages = [];
+  }
 }
 
 function normalizeSpeechText(text) {
@@ -1095,16 +1160,18 @@ function saveAssistantSpeechText(text) {
 }
 
 function isStopCommand(normalizedText) {
-  return /\b(stop|stop it|stop karo|ruko|ruk jao|ruko|bas|bus|chup|chup ho jao|band karo|band kar do|rukiye)\b/.test(normalizedText);
+  return /\b(stop|stop it|stop karo|ruko|ruk jao|bas|bus|chup|chup ho jao|chup karo|band karo|band kar do|rukiye|rok do|ruk|rokna|mat bolo|khamosh|khamosh ho jao)\b/.test(normalizedText);
 }
 
 function isSwitchToVivek(normalizedText) {
-  return /^(vivek)$/.test(normalizedText)
+  // Match "vivek" anywhere in the utterance (at start, alone, or as command)
+  return /\b(vivek|vi vek|viveek|bivek|vibek|vivec|viveck|wivek|vivak|vyvek|veevek)\b/.test(normalizedText)
     || /\b(switch to vivek|back to vivek|call vivek|activate vivek|male agent)\b/.test(normalizedText);
 }
 
 function isSwitchToPriya(normalizedText) {
-  return /^(priya)$/.test(normalizedText)
+  // Match "priya" anywhere in the utterance (at start, alone, or as command)
+  return /\b(priya|prya|preya|priyaa)\b/.test(normalizedText)
     || /\b(switch to priya|call priya|activate priya|female agent)\b/.test(normalizedText);
 }
 
@@ -1115,6 +1182,9 @@ function stopCurrentResponseOnly() {
   }
   suppressModelAudioUntilTurnComplete = true;
   stopGeminiPlayback();
+  // Reset play cursor so any chunks that arrive before suppressModelAudioUntilTurnComplete
+  // takes effect don't queue up behind the old nextPlayTime.
+  if (audioCtx) nextPlayTime = audioCtx.currentTime;
   isThinking = false;
   isListening = true;
   setOrbMode('listening');
@@ -1124,13 +1194,24 @@ function stopCurrentResponseOnly() {
 }
 
 async function saveMessage(role, content) {
-  if (!currentSessionId) return;
+  if (!currentSessionId) {
+    console.warn('[VIVEK] saveMessage: no session ID, message not saved:', role, content.slice(0,40));
+    return;
+  }
   try {
-    await fetch(`${BACKEND_URL}/api/sessions/${currentSessionId}/messages`, {
+    const res = await fetch(`${BACKEND_URL}/api/sessions/${currentSessionId}/messages`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role, content }),
     });
-  } catch(err) {}
+    if (!res.ok) {
+      const err = await res.text();
+      console.warn('[VIVEK] saveMessage failed:', res.status, err);
+    } else {
+      console.log('[VIVEK] Saved message:', role, content.slice(0, 50));
+    }
+  } catch(err) {
+    console.warn('[VIVEK] saveMessage network error:', err.message);
+  }
 }
 
 async function loadHistory() {
@@ -1182,7 +1263,18 @@ function toggleHistory() {
 async function startMicCapture() {
   if (micStream) return;
   try {
-    ensureAudioCtx(); nativeSR = audioCtx.sampleRate;
+    ensureAudioCtx();
+    // Ensure AudioContext is running — it may be suspended if gesture was not yet given
+    if (audioCtx.state === 'suspended') {
+      try { await audioCtx.resume(); } catch(e) {}
+    }
+    if (audioCtx.state !== 'running') {
+      console.warn('[VIVEK] AudioContext not running, state:', audioCtx.state);
+      // Can't start mic without running AudioContext — retry after short delay
+      setTimeout(() => { if (!micStream && isListening) startMicCapture(); }, 500);
+      return;
+    }
+    nativeSR = audioCtx.sampleRate;
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
@@ -1308,7 +1400,7 @@ function stopAll() {
   stopGeminiPlayback();
   closeLiveSession();
   setOrbMode('idle');
-  if (apiKey) setTimeout(() => startGeminiSession(null), 450);
+  if (apiKey && gestureUnlocked) setTimeout(() => startGeminiSession(null), 450);
 }
 
 function stopSpeaking() { stopAll(); }
@@ -1415,12 +1507,10 @@ async function startGeminiSession(initialText) {
       }
 
       if (sc.outputAudioTranscription && sc.outputAudioTranscription.text) {
-        if (suppressModelAudioUntilTurnComplete) {
-          // Ignore remaining model output after an explicit stop command.
-        } else {
-        assistantBuffer += sc.outputAudioTranscription.text;
-        txEl.textContent = assistantBuffer.length > 120 ? assistantBuffer.slice(0, 120) + '…' : assistantBuffer;
-        txEl.classList.add('active');
+        if (!suppressModelAudioUntilTurnComplete) {
+          assistantBuffer += sc.outputAudioTranscription.text;
+          txEl.textContent = assistantBuffer.length > 120 ? assistantBuffer.slice(0, 120) + '…' : assistantBuffer;
+          txEl.classList.add('active');
         }
       }
 
@@ -1429,32 +1519,52 @@ async function startGeminiSession(initialText) {
         const userSaid = sc.inputAudioTranscription.text.trim();
         const normalized = normalizeSpeechText(userSaid);
         if (!normalized) return;
-        saveUserSpeechText(userSaid);
 
-        if (isStopCommand(normalized)) {
-          if (isSpeaking || isThinking) stopCurrentResponseOnly();
-          return;
+        // ── COMMAND DETECTION (silent — never saved to DB, never sent to Gemini) ──
+        const cmd = detectCommand(normalized);
+
+        if (cmd === 'STOP') {
+          // Cut audio immediately on the client side.
+          // Do NOT send anything to Gemini — sending clientContent with empty turns
+          // actually triggers a new Gemini response. Instead, just suppress locally.
+          stopCurrentResponseOnly();
+          return; // DO NOT save to DB, DO NOT let Gemini respond
         }
 
-        // Check for agent switch command during active session
-        if (isSwitchToPriya(normalized) && activeAgent !== 'priya') {
-          currentSessionId = null;
-          currentSessionAgent = null;
+        if (cmd === 'SWITCH_PRIYA' && activeAgent !== 'priya') {
+          // Set restartAfterClosePending BEFORE closeLiveSession so ws.onclose
+          // doesn't spawn a competing reconnect loop that races with our setTimeout.
+          stopCurrentResponseOnly();
+          restartAfterClosePending = true;
           switchAgent('priya');
           closeLiveSession();
-          setTimeout(() => { connectFails = 0; startGeminiSession(null); }, 800);
-          return;
-        }
-        if (isSwitchToVivek(normalized) && activeAgent !== 'vivek') {
-          currentSessionId = null;
-          currentSessionAgent = null;
-          switchAgent('vivek');
-          closeLiveSession();
-          setTimeout(() => { connectFails = 0; startGeminiSession(null); }, 800);
-          return;
+          setTimeout(() => {
+            restartAfterClosePending = false;
+            restartAfterCloseText = null;
+            connectFails = 0;
+            startGeminiSession(null);
+          }, 400);
+          return; // DO NOT save to DB, DO NOT let Gemini respond
         }
 
-        // Color change
+        if (cmd === 'SWITCH_VIVEK' && activeAgent !== 'vivek') {
+          stopCurrentResponseOnly();
+          restartAfterClosePending = true;
+          switchAgent('vivek');
+          closeLiveSession();
+          setTimeout(() => {
+            restartAfterClosePending = false;
+            restartAfterCloseText = null;
+            connectFails = 0;
+            startGeminiSession(null);
+          }, 400);
+          return; // DO NOT save to DB, DO NOT let Gemini respond
+        }
+
+        // ── Normal utterance — save to DB ──
+        saveUserSpeechText(userSaid);
+
+        // Color change (non-command, agent can respond)
         const colorWords = normalized.split(/\s+/);
         if (/\b(color|colour|orb|change|make|set)\b/.test(normalized)) {
           for (const w of colorWords) { if (COLOR_MAP[w]) { setColor(COLOR_MAP[w]); break; } }
@@ -1491,27 +1601,45 @@ async function startGeminiSession(initialText) {
     }
   };
 
-  ws.onerror = function() {
+  ws.onerror = function(err) {
     clearTimeout(connTimeout);
-    document.getElementById('transcript-text').textContent = 'Connection error.';
+    connectFails++;
+    console.error('[VIVEK] WebSocket error (fail #' + connectFails + '):', err);
+    document.getElementById('transcript-text').textContent = 'Connection error — retrying…';
     document.getElementById('transcript-text').classList.add('active');
     closeLiveSession(); setOrbMode('idle');
-    if (apiKey) setTimeout(() => startGeminiSession(null), 3000);
+    if (apiKey && connectFails < MAX_FAILS) setTimeout(() => startGeminiSession(null), 3000);
+    else if (connectFails >= MAX_FAILS) {
+      document.getElementById('transcript-text').textContent = `❌ Gemini connection failed ${connectFails} times. Check GEMINI_API_KEY on server.`;
+    }
   };
 
-  ws.onclose = function() {
-    clearTimeout(connTimeout); sessionReady = false; stopMicCapture();
+  ws.onclose = function(event) {
+    clearTimeout(connTimeout);
+    const wasReady = sessionReady;
+    sessionReady = false; stopMicCapture();
     if (restartAfterClosePending) return;
     if (!isDormant && apiKey) {
       isDormant = true; setOrbMode('idle');
-      connectFails++;
-      if (connectFails >= MAX_FAILS) {
-        const txEl = document.getElementById('transcript-text');
-        txEl.textContent = `❌ Gemini connection failed ${connectFails} times. Check GEMINI_API_KEY on server.`;
-        txEl.classList.add('active');
-        return;
+      // Only count as a real failure if Gemini closed BEFORE setup completed
+      // (i.e. auth error, bad key, network issue). Normal session ends after
+      // setup completes and are NOT failures — just reconnect silently.
+      if (!wasReady) {
+        connectFails++;
+        console.warn(`[VIVEK] Connection closed before ready (fail #${connectFails}), code:`, event.code);
+        if (connectFails >= MAX_FAILS) {
+          const txEl = document.getElementById('transcript-text');
+          txEl.textContent = `❌ Gemini connection failed ${connectFails} times. Check GEMINI_API_KEY on server.`;
+          txEl.classList.add('active');
+          return;
+        }
+        // Back off longer on repeated pre-setup failures
+        if (gestureUnlocked) setTimeout(() => startGeminiSession(null), 1500 * connectFails);
+      } else {
+        // Normal close after a successful session — reconnect quietly
+        connectFails = 0;
+        if (gestureUnlocked) setTimeout(() => startGeminiSession(null), 800);
       }
-      setTimeout(() => startGeminiSession(null), 800);
     }
   };
 }
@@ -1546,7 +1674,7 @@ function updateAgentUI() {
   document.getElementById('jarvis-label').textContent = agent.label;
   const agentGenderIcon = document.getElementById('agent-gender-icon');
   if (agentGenderIcon) {
-    agentGenderIcon.textContent = agent.gender === 'female' ? '♀ P.R.I.Y.A' : '♂ V.I.V.E.K';
+    agentGenderIcon.textContent = agent.gender === 'female' ? '♀ PRIYA' : '♂ VIVEK';
   }
 }
 
@@ -1555,6 +1683,35 @@ function updateAgentUI() {
 ───────────────────────────────────────────────────── */
 var bootLines = ['bl1','bl2','bl3','bl4','bl5'];
 var bootIdx = 0, bootPct = 0;
+
+// Tracks whether the user has given the first gesture (needed for AudioContext + mic)
+let gestureUnlocked = true;
+
+async function unlockAndStart() {
+
+  // This runs inside a user gesture — safe to unlock AudioContext and request mic
+  try {
+    ensureAudioCtx();
+    // Pre-request mic permission now while we are in the gesture handler
+    // so startMicCapture() later never fails due to missing gesture
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      // Store this pre-granted stream so startMicCapture can reuse it
+      micStream = stream;
+      // Immediately stop the tracks — startMicCapture will re-open with full settings
+      stream.getTracks().forEach(t => t.stop());
+      micStream = null;
+    }
+  } catch(e) {
+    console.warn('[VIVEK] Mic pre-request failed:', e.message);
+  }
+
+  const txEl = document.getElementById('transcript-text');
+  txEl.textContent = 'Neural bridge connecting…';
+  txEl.classList.add('active');
+  connectFails = 0;
+  startGeminiSession(null);
+}
 
 function runBoot() {
   var bar = document.getElementById('boot-bar');
@@ -1570,28 +1727,33 @@ function runBoot() {
     }
     if (bootPct >= 100) {
       clearInterval(iv);
-      setTimeout(function() {
-        var overlay = document.getElementById('boot-overlay');
+      setTimeout(async function() {
+        // Load persisted state before showing activate button
+        loadInstructions();
+        const savedAgent = localStorage.getItem('vivek_active_agent') || 'vivek';
+        activeAgent = savedAgent;
+        updateAgentUI();
+        setColor(AGENTS[activeAgent].color);
+
+        const loaded = await fetchApiKey();
+        const overlay = document.getElementById('boot-overlay');
+
+        if (!loaded) {
+          // Backend offline — show error inside overlay
+          const statusEl = overlay.querySelector('.boot-status') || overlay;
+          const errDiv = document.createElement('div');
+          errDiv.style.cssText = 'color:#ff4444;margin-top:20px;font-family:monospace;font-size:13px;';
+          errDiv.textContent = 'BACKEND OFFLINE — Check BACKEND_URL in app.js';
+          overlay.appendChild(errDiv);
+          return;
+        }
+
+        // Auto-start: fade out boot overlay and begin immediately
+        overlay.style.transition = 'opacity 0.6s';
         overlay.style.opacity = '0';
-        setTimeout(async function() {
-          overlay.style.display = 'none';
-          // Load persisted state
-          loadInstructions();
-          const savedAgent = localStorage.getItem('vivek_active_agent') || 'vivek';
-          activeAgent = savedAgent;
-          updateAgentUI();
-          setColor(AGENTS[activeAgent].color);
-          
-          const txEl = document.getElementById('transcript-text');
-          const loaded = await fetchApiKey();
-          if (loaded) {
-            txEl.textContent = 'Listening…';
-            txEl.classList.add('active');
-            setTimeout(() => startGeminiSession(null), 900);
-          } else {
-            txEl.textContent = 'Backend offline. Check BACKEND_URL in app.js.'; txEl.classList.add('active');
-          }
-        }, 900);
+        setTimeout(() => { overlay.style.display = 'none'; }, 650);
+        await unlockAndStart();
+
       }, 280);
     }
   }, 25);
@@ -1608,7 +1770,10 @@ runBoot();
 canvas.addEventListener('click', function() {
   ensureAudioCtx();
   if (isSpeaking || isListening || isThinking) stopAll();
-  else if (isDormant && apiKey) { connectFails = 0; startGeminiSession(null); }
+  else if (isDormant && apiKey) {
+    connectFails = 0;
+    startGeminiSession(null);
+  }
   else if (!apiKey) showToast('BACKEND NOT CONNECTED');
 });
 
