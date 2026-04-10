@@ -89,8 +89,13 @@ async function playSpotify(songName) {
     const tokenData = await tokenRes.json();
     if (!tokenData.access_token) return;
 
+    // Activate player (satisfies browser autoplay policy)
+    if (spotifyPlayer && spotifyPlayer.activateElement) {
+      await spotifyPlayer.activateElement();
+    }
+
     // Play on our SDK device
-    await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + spotifyDeviceId, {
+    const playRes = await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + spotifyDeviceId, {
       method: 'PUT',
       headers: {
         'Authorization': 'Bearer ' + tokenData.access_token,
@@ -98,6 +103,13 @@ async function playSpotify(songName) {
       },
       body: JSON.stringify({ uris: [track.uri] }),
     });
+
+    if (!playRes.ok) {
+      const err = await playRes.json().catch(() => ({}));
+      console.error('[VIVEK] Spotify play failed:', playRes.status, err);
+      showToast('SPOTIFY ERROR: ' + (err.error?.message || playRes.status));
+      return;
+    }
 
     currentTrackInfo = { name: track.name, artist: track.artist };
     showToast('NOW PLAYING: ' + track.name.toUpperCase());
@@ -1939,20 +1951,51 @@ function openDesmosGraph(equation) {
   const frame  = document.getElementById('desmos-frame');
   const txEl   = document.getElementById('transcript-text');
 
-  // Build URL to our own /graph endpoint (same-origin — no iframe block)
-  let url = BACKEND_URL + '/graph';
+  let expr = '';
   if (equation && equation.trim()) {
-    let expr = equation.trim();
+    expr = equation.trim();
     if (!/^[a-zA-Z]\s*=/.test(expr)) expr = 'y=' + expr;
-    url += '?eq=' + encodeURIComponent(expr);
   }
 
-  console.log('[VIVEK] Loading graph:', url);
+  // Build graph page as a self-contained blob — no backend needed, works even if Render is sleeping
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VIVEK Graph</title>
+  <script src="https://www.desmos.com/api/v1.9/calculator.js?apiKey=003d4029b0d741db8dfa66ddd9bc6983"><\/script>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html, body { width:100%; height:100%; background:#1a1a2e; }
+    #calculator { width:100%; height:100%; }
+  </style>
+</head>
+<body>
+  <div id="calculator"></div>
+  <script>
+    var elt = document.getElementById('calculator');
+    var calculator = Desmos.GraphingCalculator(elt, {
+      keypad: true, expressions: true, settingsMenu: true, zoomButtons: true, border: false
+    });
+    var eq = ${JSON.stringify(expr)};
+    if (eq) calculator.setExpression({ id: 'g1', latex: eq });
+  <\/script>
+</body>
+</html>`;
 
-  // Load into iframe
-  if (frame) frame.src = url;
+  const blob = new Blob([html], { type: 'text/html' });
+  const blobUrl = URL.createObjectURL(blob);
 
-  // Show the modal overlay
+  console.log('[VIVEK] Loading graph with equation:', expr);
+
+  if (frame) {
+    // Revoke previous blob URL to avoid memory leak
+    if (frame._blobUrl) URL.revokeObjectURL(frame._blobUrl);
+    frame._blobUrl = blobUrl;
+    frame.src = blobUrl;
+  }
+
   if (modal) {
     modal.style.display = 'flex';
     modal.classList.add('show');
@@ -2093,6 +2136,7 @@ function runBoot() {
         // Auto-start: fade out boot overlay and begin immediately
         overlay.style.transition = 'opacity 0.6s';
         overlay.style.opacity = '0';
+        overlay.style.pointerEvents = 'none';
         setTimeout(() => { overlay.style.display = 'none'; }, 650);
         await unlockAndStart();
 
@@ -2104,26 +2148,34 @@ function runBoot() {
 /* ─────────────────────────────────────────────────────
    INIT
 ───────────────────────────────────────────────────── */
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
-requestAnimationFrame(drawJarvisInterface);
-runBoot();
+function initApp() {
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+  requestAnimationFrame(drawJarvisInterface);
+  runBoot();
 
-canvas.addEventListener('click', function() {
-  ensureAudioCtx();
-  if (isSpeaking || isListening || isThinking) stopAll();
-  else if (isDormant && apiKey) {
-    connectFails = 0;
-    startGeminiSession(null);
-  }
-  else if (!apiKey) showToast('BACKEND NOT CONNECTED');
-});
+  canvas.addEventListener('click', function() {
+    ensureAudioCtx();
+    if (isSpeaking || isListening || isThinking) stopAll();
+    else if (isDormant && apiKey) {
+      connectFails = 0;
+      startGeminiSession(null);
+    }
+    else if (!apiKey) showToast('BACKEND NOT CONNECTED');
+  });
 
-/* Quick agent toggle button */
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'p' || e.key === 'P') {
-    if (activeAgent === 'vivek') switchAgent('priya');
-    else switchAgent('vivek');
-  }
-  if (e.key === 'Escape') stopAll();
-});
+  /* Quick agent toggle button */
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'p' || e.key === 'P') {
+      if (activeAgent === 'vivek') switchAgent('priya');
+      else switchAgent('vivek');
+    }
+    if (e.key === 'Escape') stopAll();
+  });
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
