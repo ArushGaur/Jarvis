@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>V.I.V.E.K — Graph</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a1a; display: flex; flex-direction: column; height: 100vh; font-family: 'Orbitron', monospace; }
+  #header {
+    background: #0a0a1a;
+    border-bottom: 1px solid rgba(255,154,0,0.4);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    color: #ff9a00;
+    font-size: 13px;
+    letter-spacing: .15em;
+    flex-shrink: 0;
+  }
+  #header span { opacity: 0.6; }
+  #eq-display {
+    color: #fff;
+    background: rgba(255,154,0,0.1);
+    border: 1px solid rgba(255,154,0,0.3);
+    padding: 4px 14px;
+    border-radius: 3px;
+    letter-spacing: .05em;
+    font-size: 14px;
+    max-width: 60vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #calculator { flex: 1; width: 100%; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <span>⬡ V.I.V.E.K GRAPH</span>
+  <div id="eq-display">loading…</div>
+</div>
+
+<div id="calculator"></div>
+
+<script src="https://www.desmos.com/api/v1.8/calculator.js?apiKey=dcb31709b452b1cf9dc26972add0faa6"></script>
+<script>
+  // Read equation from URL param ?eq=...
+  const params = new URLSearchParams(window.location.search);
+  const rawEq = params.get('eq') || '';
+
+  // Show the equation in header
+  const eqDisplay = document.getElementById('eq-display');
+  eqDisplay.textContent = rawEq || 'Blank Calculator';
+
+  // Init Desmos calculator
+  const elt = document.getElementById('calculator');
+  const calculator = Desmos.GraphingCalculator(elt, {
+    keypad: true,
+    expressions: true,
+    settingsMenu: true,
+    zoomButtons: true,
+    backgroundColor: '#0a0a1a',
+    expressionFontSize: 16
+  });
+
+  // Set the equation if provided
+  if (rawEq) {
+    let expr = rawEq.trim();
+    // If it doesn't already have "y=" or "f(x)=" etc, prepend y=
+    if (!/^[a-zA-Z](\(x\))?\s*=/.test(expr)) {
+      expr = 'y=' + expr;
+    }
+    calculator.setExpression({ id: '1', latex: expr, color: '#ff9a00' });
+  }
+</script>
+</body>
+</html>
